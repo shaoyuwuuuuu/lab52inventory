@@ -1,0 +1,167 @@
+<%- include('partials/_head', { page: 'products' }) %>
+
+<style>
+.product-row { cursor: pointer; }
+.product-row:hover td { background: #f8f9ff; }
+.product-row.active td { background: #eef1ff; }
+.expand-row td { padding: 0 !important; }
+.expand-inner { padding: 12px 16px; border-top: 1px solid #e9ecef; background: #f8f9fc; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="page-title mb-0"><i class="bi bi-boxes me-2"></i>庫存管理</div>
+  <a href="/products/new" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>新增產品</a>
+</div>
+
+<% if (products.length === 0) { %>
+  <div class="text-center text-muted py-5">
+    尚無產品，請先 <a href="/import">匯入資料</a> 或 <a href="/products/new">新增產品</a>
+  </div>
+<% } else { %>
+<div class="table-responsive">
+  <table class="table table-hover align-middle mb-0" id="products-table">
+    <thead class="table-light">
+      <tr>
+        <th></th>
+        <th>產品名稱</th>
+        <th class="d-none d-md-table-cell">SKU</th>
+        <th class="d-none d-lg-table-cell">ASIN</th>
+        <th class="d-none d-lg-table-cell">條碼</th>
+        <th class="text-end" style="min-width:80px">庫存(箱)</th>
+        <th class="text-end d-none d-md-table-cell">每箱</th>
+        <th class="text-end d-none d-md-table-cell">總支／組數</th>
+        <th class="d-none d-md-table-cell">最近效期</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% products.forEach(p => {
+        const cartons = p.total_cartons || 0;
+        const isZero  = cartons <= 0;
+        let badge = null;
+        if (!isZero && p.days_to_exp !== null && p.days_to_exp !== undefined) {
+          if      (p.days_to_exp <= 90)  badge = 'bg-danger';
+          else if (p.days_to_exp <= 180) badge = 'bg-warning text-dark';
+          else                           badge = 'bg-success';
+        }
+      %>
+      <tr class="product-row <%= isZero ? 'text-muted' : '' %>"
+          style="<%= isZero ? 'opacity:.6' : '' %>"
+          data-id="<%= p.id %>">
+        <td class="ps-3" style="width:24px">
+          <i class="bi bi-chevron-right toggle-icon" style="font-size:.75rem;transition:transform .2s"></i>
+        </td>
+        <td>
+          <span class="<%= isZero ? 'text-muted' : 'fw-semibold' %>"><%= p.name %></span>
+          <% if (!isZero && p.batch_count > 1) { %>
+            <span class="ms-1 badge bg-secondary bg-opacity-25 text-secondary" style="font-size:.65rem"><%= p.batch_count %> 批</span>
+          <% } %>
+        </td>
+        <td class="d-none d-md-table-cell small text-muted"><%= p.sku || '—' %></td>
+        <td class="d-none d-lg-table-cell small text-muted"><%= p.asin || '—' %></td>
+        <td class="d-none d-lg-table-cell small text-muted"><%= p.ean || '—' %></td>
+        <td class="text-end <%= isZero ? '' : 'fw-bold text-primary' %>" style="<%= isZero ? '' : 'font-size:1.2rem' %>">
+          <%= isZero ? '0' : (cartons % 1 === 0 ? cartons : cartons.toFixed(1)) %>
+        </td>
+        <td class="text-end d-none d-md-table-cell text-muted small">
+          <%= p.qty_per_carton || '—' %>
+        </td>
+        <td class="text-end d-none d-md-table-cell small">
+          <% if (p.qty_per_carton) { %><strong><%= Math.round(cartons * p.qty_per_carton).toLocaleString() %></strong><% } %>
+        </td>
+        <td class="d-none d-md-table-cell">
+          <% if (!isZero && p.earliest_exp && badge) { %>
+            <span class="badge <%= badge %>"><%= p.earliest_exp %></span>
+          <% } else if (!isZero && p.earliest_exp) { %>
+            <span class="text-muted small"><%= p.earliest_exp %></span>
+          <% } %>
+        </td>
+        <td class="text-end" onclick="event.stopPropagation()">
+          <a href="/products/<%= p.id %>" class="btn btn-sm btn-outline-secondary py-0 px-2">詳細</a>
+        </td>
+      </tr>
+      <!-- 展開列（預設隱藏） -->
+      <tr class="expand-row" id="expand-<%= p.id %>" style="display:none">
+        <td colspan="10">
+          <div class="expand-inner" id="expand-body-<%= p.id %>">
+            <span class="text-muted small">載入中...</span>
+          </div>
+        </td>
+      </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+<% } %>
+
+<script>
+const movements = <%- JSON.stringify(movementsByProduct) %>;
+const batches   = <%- JSON.stringify(batchesByProduct) %>;
+
+document.querySelectorAll('.product-row').forEach(row => {
+  row.addEventListener('click', () => {
+    const id = row.dataset.id;
+    const expandRow = document.getElementById('expand-' + id);
+    const icon = row.querySelector('.toggle-icon');
+    const isOpen = expandRow.style.display !== 'none';
+
+    if (isOpen) {
+      expandRow.style.display = 'none';
+      icon.style.transform = '';
+      row.classList.remove('active');
+    } else {
+      expandRow.style.display = '';
+      icon.style.transform = 'rotate(90deg)';
+      row.classList.add('active');
+      renderMovements(id);
+    }
+  });
+});
+
+function renderMovements(id) {
+  const body = document.getElementById('expand-body-' + id);
+  if (body.dataset.rendered) return;
+  body.dataset.rendered = '1';
+
+  const bList = batches[id] || [];
+  const mList = movements[id] || [];
+
+  // 批次區
+  let html = '<div class="mb-2">';
+  if (bList.length) {
+    html += '<div class="small fw-semibold text-muted mb-1">在庫批次</div><div class="d-flex flex-wrap gap-2 mb-3">';
+    bList.forEach(b => {
+      html += `<span class="border rounded px-2 py-1 small">
+        ${b.exp_date || '無效期'} &nbsp;
+        <strong class="text-primary">${b.current_cartons}</strong> 箱
+        <span class="text-muted">(${b.location})</span>
+      </span>`;
+    });
+    html += '</div>';
+  }
+
+  // 異動區
+  html += '<div class="small fw-semibold text-muted mb-1">異動紀錄</div>';
+  if (!mList.length) {
+    html += '<span class="text-muted small">尚無異動記錄</span>';
+  } else {
+    html += '<table class="table table-sm mb-0" style="font-size:.82rem">'
+      + '<thead class="table-light"><tr><th>日期</th><th>批次EXP</th><th>類型</th><th class="text-center">箱數</th><th>備註</th></tr></thead><tbody>';
+    mList.forEach(m => {
+      const isIn = m.qty_cartons > 0;
+      html += `<tr>
+        <td>${m.date}</td>
+        <td class="text-muted">${m.exp_date || '—'}</td>
+        <td><span class="badge ${isIn ? 'bg-success' : 'bg-danger'}">${m.type}</span></td>
+        <td class="text-center">${isIn ? '+' : ''}${m.qty_cartons}</td>
+        <td class="text-muted">${m.note || ''}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+  body.innerHTML = html;
+}
+</script>
+
+<%- include('partials/_foot') %>

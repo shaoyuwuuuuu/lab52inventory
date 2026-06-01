@@ -1,0 +1,60 @@
+<%- include('partials/_head', { page: 'import' }) %>
+
+<div class="page-title"><i class="bi bi-cloud-download me-2"></i>匯入現有資料</div>
+
+<% if (message) { %>
+  <div class="alert alert-success"><i class="bi bi-check-circle me-1"></i><%= message %></div>
+<% } %>
+<% if (error) { %>
+  <div class="alert alert-danger"><i class="bi bi-x-circle me-1"></i>錯誤：<%= error %></div>
+<% } %>
+
+<!-- 匯入 Inventory -->
+<div class="card mb-3" style="max-width:640px">
+  <div class="card-header fw-bold"><i class="bi bi-file-earmark-spreadsheet me-1"></i>匯入庫存快照（Inventory.html）</div>
+  <div class="card-body">
+    <p class="text-muted small mb-2">從 <code>AMZLGS_extracted/Inventory.html</code> 匯入產品、批次與歷史異動。<br>⚠️ 請只執行一次，重複匯入會產生重複資料。</p>
+    <form action="/import/inventory" method="POST">
+      <button type="submit" class="btn btn-primary" onclick="return confirm('確定匯入？重複執行會有重複資料。')">
+        <i class="bi bi-upload me-1"></i>開始匯入 Inventory.html
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- 匯入帳單 -->
+<div class="card mb-3" style="max-width:640px">
+  <div class="card-header fw-bold"><i class="bi bi-receipt me-1"></i>匯入月份帳單</div>
+  <div class="card-body">
+    <p class="text-muted small mb-2">選擇要匯入的月份帳單 HTML 檔案：</p>
+    <form action="/import/billing" method="POST" class="d-flex gap-2 align-items-center">
+      <select name="filename" class="form-select form-select-sm" style="max-width:260px" required>
+        <option value="">— 選擇月份 —</option>
+        <% const billingFiles = [
+          'Sept 2024.html','Oct 2024.html','Nov 2024.html','Dec 2024.html',
+          'Jan 2025.html','Feb 2025.html','JULY 2025.html','AUG 2025.html',
+          'SEPT 2025.html','OCT 2025.html','NOV 2025.html','Dec 2025.html',
+          'Jan 2026.html','FEB 2026.html','March 26.html','APRIL 26.html','MAY 26.html'
+        ]; %>
+        <% billingFiles.forEach(f => { %><option value="<%= f %>"><%= f %></option><% }) %>
+      </select>
+      <button type="submit" class="btn btn-sm btn-outline-primary">匯入</button>
+    </form>
+    <div class="mt-2 text-muted small">💡 可多次執行匯入不同月份，不會產生重複。</div>
+  </div>
+</div>
+
+<!-- 說明 -->
+<div class="card" style="max-width:640px">
+  <div class="card-header fw-bold">匯入後建議步驟</div>
+  <div class="card-body">
+    <ol class="mb-0 small">
+      <li>先匯入 Inventory.html → 建立所有產品與批次</li>
+      <li>至「庫存管理」確認各產品資料正確，補填 <strong>PCS/箱</strong></li>
+      <li>依序匯入每個月份帳單</li>
+      <li>未來每次有異動，到「新增異動」手動登錄</li>
+    </ol>
+  </div>
+</div>
+
+<%- include('partials/_foot') %>

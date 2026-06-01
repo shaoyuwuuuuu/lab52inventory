@@ -1,0 +1,58 @@
+<%- include('partials/_head', { page: 'billing' }) %>
+
+<div class="mb-3"><a href="/billing" class="text-muted text-decoration-none small"><i class="bi bi-arrow-left"></i> 返回帳單</a></div>
+<div class="page-title">新增帳單記錄</div>
+
+<div class="card" style="max-width:560px">
+  <div class="card-body">
+    <form action="/billing" method="POST">
+      <div class="row g-2 mb-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">日期</label>
+          <input type="date" name="date" class="form-control" value="<%= new Date().toISOString().slice(0,10) %>" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">類型</label>
+          <select name="type" class="form-select" required>
+            <option value="STORAGE">STORAGE — 倉儲費</option>
+            <option value="FBA">FBA — FBA出貨費</option>
+            <option value="DROPSHIP">DROPSHIP — 直出費</option>
+            <option value="POSTAGE">POSTAGE — 郵資</option>
+            <option value="RESTICKER">RESTICKER — 重貼標</option>
+            <option value="REPACK">REPACK — 重新包裝</option>
+            <option value="CHECK IN">CHECK IN — 入倉費</option>
+            <option value="PALLET">PALLET — 棧板費</option>
+          </select>
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">項目說明</label>
+        <input type="text" name="job_name" class="form-control" value="<%= prefill.job_name || '' %>" placeholder="例：STRAWBERRY 10 BOX">
+      </div>
+      <div class="row g-2 mb-3">
+        <div class="col">
+          <label class="form-label fw-semibold">數量</label>
+          <input type="number" step="0.001" name="qty" class="form-control" value="<%= prefill.qty || '' %>">
+        </div>
+        <div class="col">
+          <label class="form-label fw-semibold">單價 ($)</label>
+          <input type="number" step="0.01" name="unit_fee" class="form-control" value="<%= prefill.unit_fee || '' %>">
+        </div>
+        <div class="col">
+          <label class="form-label fw-semibold">小計 ($)</label>
+          <input type="number" step="0.01" name="total_fee" class="form-control" value="<%= prefill.total_fee || '' %>">
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">備註</label>
+        <input type="text" name="note" class="form-control">
+      </div>
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary">儲存</button>
+        <a href="/billing" class="btn btn-outline-secondary">取消</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<%- include('partials/_foot') %>
