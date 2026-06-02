@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lab52 庫存系統</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<style>
+  body { background:#f5f6fa; }
+  .sidebar { width:220px; min-height:100vh; background:#1a2035; position:fixed; top:0; left:0; z-index:10; }
+  .sidebar .brand { font-size:1.1rem; font-weight:700; color:#fff; padding:1.2rem; border-bottom:1px solid #2d3a5c; }
+  .sidebar .nav-link { color:#a0aec0; padding:.6rem 1.2rem; border-radius:6px; margin:2px 8px; cursor:pointer; }
+  .sidebar .nav-link:hover,.sidebar .nav-link.active { background:#2d3a5c; color:#fff; }
+  .main-content { margin-left:220px; padding:1.5rem 2rem; min-height:100vh; }
+  .card { border:none; border-radius:12px; box-shadow:0 1px 8px rgba(0,0,0,.07); }
+  .stat-card { border-left:4px solid; }
+  .stat-card.blue  { border-color:#4e73df; }
+  .stat-card.green { border-color:#1cc88a; }
+  .stat-card.yellow{ border-color:#f6c23e; }
+  .page-title { font-size:1.3rem; font-weight:700; color:#2d3a5c; margin-bottom:1.2rem; }
+  .section { display:none; }
+  .section.active { display:block; }
+  .table th { background:#f8f9fc; font-weight:600; font-size:.85rem; }
+  .batch-row { background:#f8f9fc !important; font-size:.875rem; }
+  .batch-row td { padding:.4rem .75rem; }
+  .toggle-batches { cursor:pointer; user-select:none; }
+  #toast-container { position:fixed; bottom:1.5rem; right:1.5rem; z-index:9999; width:300px; }
+  .toast-item { margin-top:.5rem; padding:.75rem 1rem; border-radius:8px; color:#fff; font-size:.875rem; animation:fadeIn .2s; }
+  .toast-success { background:#1cc88a; }
+  .toast-error   { background:#e74a3b; }
+  .toast-info    { background:#4e73df; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+  .sync-bar { background:#fff; border-radius:10px; padding:.6rem 1rem; margin-bottom:1.2rem; box-shadow:0 1px 6px rgba(0,0,0,.06); font-size:.85rem; display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; }
+  .movement-badge { font-size:.75rem; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div class="sidebar d-flex flex-column">
+  <div class="brand"><i class="bi bi-box-seam me-2"></i>Lab52 庫存</div>
+  <nav class="nav flex-column mt-2">
+    <a class="nav-link active" onclick="showSection('dashboard')"><i class="bi bi-speedometer2 me-2"></i>總覽</a>
+    <a class="nav-link" onclick="showSection('products')"><i class="bi bi-boxes me-2"></i>庫存管理</a>
+    <a class="nav-link" onclick="showSection('billing')"><i class="bi bi-receipt me-2"></i>帳單紀錄</a>
+  </nav>
+  <div class="mt-auto p-3" style="font-size:.75rem; color:#4a5568;">
+    <div id="sync-status">未同步</div>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="main-content">
+
+  <!-- Sync Bar -->
+  <div class="sync-bar">
+    <span class="text-muted"><i class="bi bi-arrow-repeat me-1"></i>資料來源：</span>
+    <span id="sync-mode-label" class="text-muted">-</span>
+    <button class="btn btn-sm btn-outline-primary" onclick="syncData()"><i class="bi bi-cloud-download me-1"></i>立即同步</button>
+    <span id="local-url-area" style="display:none; flex:1;">
+      <input type="text" id="gasUrlInput" class="form-control form-control-sm" placeholder="貼入 GAS 部署 URL（本機模式用）" style="font-size:.8rem;">
+      <button class="btn btn-sm btn-secondary ms-1" onclick="saveGasUrl()">儲存</button>
+    </span>
+  </div>
+
+  <!-- ── Dashboard ──────────────────────────────────────────────────── -->
+  <div id="section-dashboard" class="section active">
+    <div class="page-title"><i class="bi bi-speedometer2 me-2"></i>庫存總覽</div>
+    <div class="row g-3 mb-4">
+      <div class="col-md-4">
+        <div class="card stat-card blue p-3">
+          <div class="text-muted small">產品種類</div>
+          <div class="fs-2 fw-bold text-primary" id="stat-products">-</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card stat-card green p-3">
+          <div class="text-muted small">批次數量</div>
+          <div class="fs-2 fw-bold text-success" id="stat-batches">-</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card stat-card yellow p-3">
+          <div class="text-muted small">在倉總箱數</div>
+          <div class="fs-2 fw-bold text-warning" id="stat-cartons">-</div>
+        </div>
+      </div>
+    </div>
+    <div class="row g-3">
+      <div class="col-lg-7">
+        <div class="card p-3">
+          <div class="fw-bold mb-3 text-danger"><i class="bi bi-exclamation-triangle me-1"></i>即將到期（6個月內）</div>
+          <div id="expiring-table"></div>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="card p-3">
+          <div class="fw-bold mb-3"><i class="bi bi-clock-history me-1"></i>近期異動</div>
+          <div id="recent-moves" style="max-height:320px;overflow-y:auto;"></div>
+          <div class="mt-2">
+            <button class="btn btn-sm btn-outline-primary w-100" onclick="openMovementModal()">
+              <i class="bi bi-plus"></i> 新增異動
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Products ───────────────────────────────────────────────────── -->
+  <div id="section-products" class="section">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div class="page-title mb-0"><i class="bi bi-boxes me-2"></i>庫存管理</div>
+      <button class="btn btn-primary btn-sm" onclick="openProductModal()">
+        <i class="bi bi-plus-lg me-1"></i>新增產品
+      </button>
+    </div>
+    <div class="card">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0" id="products-table">
+          <thead>
+            <tr>
+              <th style="width:30px;"></th>
+              <th>產品名稱</th>
+              <th>SKU</th>
+              <th>ASIN</th>
+              <th class="text-end">在倉箱數</th>
+              <th>最近效期</th>
+              <th style="width:120px;"></th>
+            </tr>
+          </thead>
+          <tbody id="products-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Billing ────────────────────────────────────────────────────── -->
+  <div id="section-billing" class="section">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div class="page-title mb-0"><i class="bi bi-receipt me-2"></i>帳單紀錄</div>
+      <button class="btn btn-primary btn-sm" onclick="openBillingModal()">
+        <i class="bi bi-plus-lg me-1"></i>新增帳單
+      </button>
+    </div>
+    <div class="card p-3 mb-3">
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <label class="fw-semibold small mb-0">月份篩選：</label>
+        <select class="form-select form-select-sm" id="billing-month-filter" style="width:160px;" onchange="renderBilling()">
+          <option value="">全部</option>
+        </select>
+        <span id="billing-month-total" class="ms-2 small text-muted"></span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>類型</th>
+              <th>工作名稱</th>
+              <th class="text-end">數量</th>
+              <th class="text-end">單價</th>
+              <th class="text-end">總費用</th>
+              <th>備注</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="billing-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main-content -->
+
+<!-- ── Modal: 新增/編輯產品 ──────────────────────────────────────────────── -->
+<div class="modal fade" id="productModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="productModalTitle">新增產品</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="p-edit-id">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">產品名稱 <span class="text-danger">*</span></label>
+          <input type="text" class="form-control" id="p-name">
+        </div>
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label small">SKU</label>
+            <input type="text" class="form-control form-control-sm" id="p-sku">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">EAN</label>
+            <input type="text" class="form-control form-control-sm" id="p-ean">
+          </div>
+          <div class="col-12">
+            <label class="form-label small">ASIN</label>
+            <input type="text" class="form-control form-control-sm" id="p-asin">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">材積 (ft³/箱)</label>
+            <input type="number" step="0.01" class="form-control form-control-sm" id="p-cf">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">每箱數量 (pcs)</label>
+            <input type="number" class="form-control form-control-sm" id="p-qty">
+          </div>
+        </div>
+        <div class="mt-2">
+          <label class="form-label small">備注</label>
+          <input type="text" class="form-control form-control-sm" id="p-note">
+        </div>
+        <div id="p-error" class="text-danger small mt-2" style="display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary btn-sm" onclick="saveProduct()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: 新增批次 ────────────────────────────────────────────────────── -->
+<div class="modal fade" id="batchModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">新增批次</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="b-product-id">
+        <div class="mb-2">
+          <label class="form-label small">產品</label>
+          <div class="fw-semibold small" id="b-product-name"></div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">效期日期</label>
+          <input type="date" class="form-control form-control-sm" id="b-exp">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">倉別</label>
+          <select class="form-select form-select-sm" id="b-location">
+            <option value="AMZLGS">AMZLGS</option>
+            <option value="FBA">FBA</option>
+            <option value="OTHER">OTHER</option>
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">現存箱數</label>
+          <input type="number" step="0.5" class="form-control form-control-sm" id="b-cartons" value="0">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">備注</label>
+          <input type="text" class="form-control form-control-sm" id="b-note">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary btn-sm" onclick="saveBatch()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: 新增異動 ────────────────────────────────────────────────────── -->
+<div class="modal fade" id="movementModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">新增庫存異動</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label small fw-semibold">批次選擇</label>
+          <select class="form-select form-select-sm" id="m-batch-id">
+            <option value="">-- 選擇批次 --</option>
+          </select>
+        </div>
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label small">日期</label>
+            <input type="date" class="form-control form-control-sm" id="m-date">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">異動類型</label>
+            <select class="form-select form-select-sm" id="m-type">
+              <option value="IN">IN（入庫）</option>
+              <option value="OUT_FBA">OUT_FBA（出 FBA）</option>
+              <option value="OUT_DROPSHIP">OUT_DROPSHIP（出 Dropship）</option>
+              <option value="REPACK">REPACK（改裝）</option>
+              <option value="ADJUST">ADJUST（盤點調整）</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label small">箱數</label>
+            <input type="number" step="0.5" min="0.5" class="form-control form-control-sm" id="m-qty">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">備注</label>
+            <input type="text" class="form-control form-control-sm" id="m-note">
+          </div>
+        </div>
+        <div class="mt-2 text-muted small">OUT_FBA / OUT_DROPSHIP / REPACK 自動計為負數（扣庫存）</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary btn-sm" onclick="saveMovement()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: 新增帳單 ────────────────────────────────────────────────────── -->
+<div class="modal fade" id="billingModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">新增帳單</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label small">日期</label>
+            <input type="date" class="form-control form-control-sm" id="bl-date">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">類型</label>
+            <select class="form-select form-select-sm" id="bl-type">
+              <option>STORAGE</option>
+              <option>HANDLING</option>
+              <option>SHIPPING</option>
+              <option>REPACK</option>
+              <option>OTHER</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label small">工作名稱</label>
+            <input type="text" class="form-control form-control-sm" id="bl-job">
+          </div>
+          <div class="col-4">
+            <label class="form-label small">數量</label>
+            <input type="number" step="0.01" class="form-control form-control-sm" id="bl-qty">
+          </div>
+          <div class="col-4">
+            <label class="form-label small">單價 ($)</label>
+            <input type="number" step="0.01" class="form-control form-control-sm" id="bl-unit">
+          </div>
+          <div class="col-4">
+            <label class="form-label small">總費用 ($)</label>
+            <input type="number" step="0.01" class="form-control form-control-sm" id="bl-total">
+          </div>
+          <div class="col-12">
+            <label class="form-label small">備注</label>
+            <input type="text" class="form-control form-control-sm" id="bl-note">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary btn-sm" onclick="saveBilling()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast-container"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+var S = { products:[], batches:[], movements:[], billing:[] };
+var GAS_MODE = (typeof google !== 'undefined' && typeof google.script !== 'undefined');
+var GAS_URL  = localStorage.getItem('lab52_gas_url') || '';
+var _modals  = {};
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+function showSection(name) {
+  document.querySelectorAll('.section').forEach(function(el) { el.classList.remove('active'); });
+  document.querySelectorAll('.sidebar .nav-link').forEach(function(el) { el.classList.remove('active'); });
+  document.getElementById('section-' + name).classList.add('active');
+  event.currentTarget.classList.add('active');
+}
+
+// ── GAS Bridge ────────────────────────────────────────────────────────────────
+function gasCall(fnName, args, onOk, onFail) {
+  if (GAS_MODE) {
+    var runner = google.script.run
+      .withSuccessHandler(function(r) {
+        if (r && r.error) { showToast('錯誤：' + r.error, 'error'); if (onFail) onFail(r.error); }
+        else if (onOk) onOk(r);
+      })
+      .withFailureHandler(function(e) {
+        showToast('執行失敗：' + (e.message||e), 'error');
+        if (onFail) onFail(e);
+      });
+    if (args !== undefined) runner[fnName](args);
+    else runner[fnName]();
+  } else {
+    showToast('寫入功能需從 GAS 部署連結開啟', 'info');
+    if (onFail) onFail('local mode');
+  }
+}
+
+function gasCall2(fnName, a1, a2, onOk, onFail) {
+  if (GAS_MODE) {
+    google.script.run
+      .withSuccessHandler(function(r) {
+        if (r && r.error) { showToast('錯誤：' + r.error, 'error'); if (onFail) onFail(r.error); }
+        else if (onOk) onOk(r);
+      })
+      .withFailureHandler(function(e) {
+        showToast('執行失敗：' + (e.message||e), 'error');
+        if (onFail) onFail(e);
+      })[fnName](a1, a2);
+  } else {
+    showToast('寫入功能需從 GAS 部署連結開啟', 'info');
+    if (onFail) onFail('local mode');
+  }
+}
+
+// ── Sync / Load Data ──────────────────────────────────────────────────────────
+function syncData() {
+  if (GAS_MODE) {
+    google.script.run
+      .withSuccessHandler(applyData)
+      .withFailureHandler(function(e) { showToast('同步失敗：' + e.message, 'error'); })
+      .getAllData();
+  } else if (GAS_URL) {
+    var cb = 'lab52cb_' + Date.now();
+    window[cb] = function(data) {
+      applyData(data);
+      delete window[cb];
+      var s = document.getElementById('_jsonp');
+      if (s) s.remove();
+    };
+    var script = document.createElement('script');
+    script.id  = '_jsonp';
+    script.src = GAS_URL + '?action=getData&callback=' + cb;
+    script.onerror = function() { showToast('同步失敗，請確認 GAS URL', 'error'); };
+    document.body.appendChild(script);
+  } else {
+    // Try to load from localStorage cache
+    var cache = localStorage.getItem('lab52_cache');
+    if (cache) {
+      applyData(JSON.parse(cache));
+      showToast('載入本機快取', 'info');
+    } else {
+      showToast('請設定 GAS URL 以同步資料', 'info');
+    }
+  }
+}
+
+function applyData(data) {
+  if (data.products && !data.products.error)  S.products  = data.products.rows  || [];
+  if (data.batches  && !data.batches.error)   S.batches   = data.batches.rows   || [];
+  if (data.movements&& !data.movements.error) S.movements = data.movements.rows || [];
+  if (data.billing  && !data.billing.error)   S.billing   = data.billing.rows   || [];
+  localStorage.setItem('lab52_cache', JSON.stringify({
+    products: {rows: S.products}, batches: {rows: S.batches},
+    movements: {rows: S.movements}, billing: {rows: S.billing}
+  }));
+  var t = new Date().toLocaleTimeString('zh-TW');
+  document.getElementById('sync-status').textContent = '已同步 ' + t;
+  renderAll();
+  showToast('資料已同步', 'success');
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderAll() {
+  renderDashboard();
+  renderProducts();
+  renderBilling();
+}
+
+function renderDashboard() {
+  var activeBatches = S.batches.filter(function(b) { return parseFloat(b.current_cartons) > 0; });
+  var totalCartons  = activeBatches.reduce(function(s, b) { return s + (parseFloat(b.current_cartons)||0); }, 0);
+  document.getElementById('stat-products').textContent = S.products.length;
+  document.getElementById('stat-batches').textContent  = activeBatches.length;
+  document.getElementById('stat-cartons').textContent  = totalCartons.toFixed(1);
+
+  // Expiring soon (within 180 days)
+  var today  = new Date(); today.setHours(0,0,0,0);
+  var cutoff = new Date(today.getTime() + 180*24*60*60*1000);
+  var expiring = S.batches.filter(function(b) {
+    if (!b.exp_date || parseFloat(b.current_cartons) <= 0) return false;
+    var d = new Date(b.exp_date); d.setHours(0,0,0,0);
+    return d <= cutoff;
+  }).sort(function(a,b) { return new Date(a.exp_date)-new Date(b.exp_date); }).slice(0,10);
+
+  var prodMap = {};
+  S.products.forEach(function(p) { prodMap[p.id] = p; });
+
+  var expHtml = expiring.length === 0
+    ? '<p class="text-muted small mb-0">無即將到期批次</p>'
+    : '<table class="table table-sm table-hover mb-0"><thead><tr><th>產品</th><th>EXP</th><th>剩餘天數</th><th>箱數</th></tr></thead><tbody>'
+      + expiring.map(function(b) {
+          var p = prodMap[b.product_id] || {};
+          var days = Math.round((new Date(b.exp_date)-today)/(24*60*60*1000));
+          var badge = days<=30?'bg-danger':days<=90?'bg-warning text-dark':'bg-secondary';
+          var pcs = p.qty_per_carton ? ' <small class="text-muted">(≈'+Math.round(b.current_cartons*p.qty_per_carton)+'pcs)</small>' : '';
+          return '<tr><td>'+(p.name||'?')+(p.sku?'<br><small class="text-muted">'+p.sku+'</small>':'')+'</td>'
+            +'<td>'+b.exp_date+'</td>'
+            +'<td><span class="badge '+badge+'">'+days+' 天</span></td>'
+            +'<td>'+parseFloat(b.current_cartons).toFixed(1)+' 箱'+pcs+'</td></tr>';
+        }).join('')
+      + '</tbody></table>';
+  document.getElementById('expiring-table').innerHTML = expHtml;
+
+  // Recent movements (last 15)
+  var recentMoves = S.movements.slice().sort(function(a,b) {
+    return (b.date < a.date ? -1 : b.date > a.date ? 1 : 0) || (b.id - a.id);
+  }).slice(0,15);
+  var batchMap = {};
+  S.batches.forEach(function(b) { batchMap[b.id] = b; });
+  var movHtml = recentMoves.length === 0
+    ? '<p class="text-muted small mb-0">尚無異動記錄</p>'
+    : recentMoves.map(function(m) {
+        var b = batchMap[m.batch_id] || {};
+        var p = prodMap[b.product_id] || {};
+        var qty = parseFloat(m.qty_cartons) || 0;
+        var badgeCls = qty >= 0 ? 'bg-success' : 'bg-danger';
+        return '<div class="d-flex justify-content-between align-items-start border-bottom py-2">'
+          +'<div><div class="small fw-bold">'+(p.name||'?')+'</div>'
+          +'<div class="text-muted" style="font-size:.75rem;">'+m.date+' &bull; '+m.type+'</div></div>'
+          +'<span class="badge movement-badge '+badgeCls+' ms-2">'+(qty>=0?'+':'')+qty.toFixed(1)+' 箱</span>'
+          +'</div>';
+      }).join('');
+  document.getElementById('recent-moves').innerHTML = movHtml;
+}
+
+function renderProducts() {
+  var batchMap  = {};
+  var moveMap   = {};
+  S.batches.forEach(function(b) {
+    if (!batchMap[b.product_id]) batchMap[b.product_id] = [];
+    batchMap[b.product_id].push(b);
+  });
+  S.movements.forEach(function(m) {
+    if (!moveMap[m.batch_id]) moveMap[m.batch_id] = [];
+    moveMap[m.batch_id].push(m);
+  });
+
+  var today = new Date(); today.setHours(0,0,0,0);
+  var rows = S.products.map(function(p) {
+    var batches = batchMap[p.id] || [];
+    var total   = batches.reduce(function(s,b) { return s+(parseFloat(b.current_cartons)||0); }, 0);
+    var activeBatches = batches.filter(function(b){ return parseFloat(b.current_cartons)>0 && b.exp_date; });
+    activeBatches.sort(function(a,b){ return new Date(a.exp_date)-new Date(b.exp_date); });
+    var earliest = activeBatches[0];
+    var expDisplay = '', expBadge = '';
+    if (earliest) {
+      var days = Math.round((new Date(earliest.exp_date)-today)/(24*60*60*1000));
+      expBadge = days<=30?'badge bg-danger':days<=90?'badge bg-warning text-dark':'badge bg-secondary';
+      expDisplay = '<span class="'+expBadge+'">'+earliest.exp_date+'</span>';
+    }
+
+    // Batch rows HTML
+    var batchHtml = batches.map(function(b) {
+      var moves = (moveMap[b.id]||[]).slice().sort(function(a,b){ return b.date<a.date?-1:b.date>a.date?1:0||b.id-a.id; }).slice(0,5);
+      var movHtml = moves.length===0?''
+        : '<div class="ms-3 mt-1" style="font-size:.78rem;">'
+          +moves.map(function(m){
+            var q=parseFloat(m.qty_cartons)||0;
+            return '<span class="me-2 text-muted">'+m.date+' '+m.type+' <strong class="'+(q>=0?'text-success':'text-danger')+'">'+
+              (q>=0?'+':'')+q.toFixed(1)+'</strong></span>';
+          }).join('')
+          +'</div>';
+      return '<tr class="batch-row"><td></td><td colspan="2">'
+        +'<span class="text-muted me-2"><i class="bi bi-box me-1"></i>'+(b.exp_date||'無效期')+'</span>'
+        +'<span class="badge bg-light text-dark border me-1">'+b.location+'</span>'
+        +movHtml+'</td>'
+        +'<td class="text-muted">'+b.note+'</td>'
+        +'<td class="text-end fw-bold">'+(parseFloat(b.current_cartons)||0).toFixed(1)+'</td>'
+        +'<td></td>'
+        +'<td><button class="btn btn-xs btn-outline-secondary py-0 px-1 me-1" style="font-size:.75rem;" onclick="openMovementModal('+b.id+')">異動</button>'
+        +'<button class="btn btn-xs btn-outline-danger py-0 px-1" style="font-size:.75rem;" onclick="confirmDeleteBatch('+b.id+', \''+escHtml(b.exp_date||'')+'\')">刪</button></td></tr>'
+        ;
+    }).join('');
+
+    return '<tr>'
+      +'<td class="toggle-batches" onclick="toggleBatches('+p.id+')" title="展開批次">'
+        +'<i class="bi bi-chevron-right text-muted" id="toggle-icon-'+p.id+'"></i></td>'
+      +'<td><strong>'+escHtml(p.name)+'</strong>'+(p.note?'<br><small class="text-muted">'+escHtml(p.note)+'</small>':'')+'</td>'
+      +'<td><small class="text-muted">'+escHtml(p.sku||'')+'</small></td>'
+      +'<td><small class="text-muted">'+escHtml(p.asin||'')+'</small></td>'
+      +'<td class="text-end fw-bold">'+total.toFixed(1)+'</td>'
+      +'<td>'+expDisplay+'</td>'
+      +'<td>'
+        +'<button class="btn btn-xs btn-outline-primary py-0 px-1 me-1" style="font-size:.75rem;" onclick="openBatchModal('+p.id+', \''+escHtml(p.name)+'\')"><i class="bi bi-plus"></i>批次</button>'
+        +'<button class="btn btn-xs btn-outline-secondary py-0 px-1 me-1" style="font-size:.75rem;" onclick="openProductModal('+p.id+')"><i class="bi bi-pencil"></i></button>'
+        +'<button class="btn btn-xs btn-outline-danger py-0 px-1" style="font-size:.75rem;" onclick="confirmDeleteProduct('+p.id+', \''+escHtml(p.name)+'\')"><i class="bi bi-trash"></i></button>'
+      +'</td>'
+      +'</tr>'
+      +'<tr id="batch-detail-'+p.id+'" style="display:none;"><td colspan="7" class="p-0"><table class="table table-sm mb-0">'+batchHtml+'</table></td></tr>';
+  }).join('');
+
+  document.getElementById('products-tbody').innerHTML = rows || '<tr><td colspan="7" class="text-center text-muted py-3">尚無產品資料</td></tr>';
+}
+
+function toggleBatches(productId) {
+  var detailRow = document.getElementById('batch-detail-' + productId);
+  var icon      = document.getElementById('toggle-icon-' + productId);
+  if (!detailRow) return;
+  var open = detailRow.style.display !== 'none';
+  detailRow.style.display = open ? 'none' : '';
+  icon.className = open ? 'bi bi-chevron-right text-muted' : 'bi bi-chevron-down text-primary';
+}
+
+function renderBilling() {
+  var months = {};
+  S.billing.forEach(function(b) {
+    var ym = String(b.date||'').slice(0,7);
+    if (ym) months[ym] = true;
+  });
+  var monthList = Object.keys(months).sort().reverse();
+  var sel = document.getElementById('billing-month-filter');
+  var curVal = sel.value;
+  sel.innerHTML = '<option value="">全部</option>'
+    + monthList.map(function(m){ return '<option value="'+m+'">'+m+'</option>'; }).join('');
+  if (curVal) sel.value = curVal;
+
+  var filter = sel.value;
+  var rows = filter ? S.billing.filter(function(b){ return String(b.date||'').slice(0,7)===filter; }) : S.billing;
+  rows = rows.slice().sort(function(a,b){ return (b.date||'')<(a.date||'')?-1:(b.date||'')>(a.date||'')?1:0; });
+
+  var total = rows.reduce(function(s,r){ return s+(parseFloat(r.total_fee)||0); }, 0);
+  document.getElementById('billing-month-total').textContent = filter ? '本月合計：$' + total.toFixed(2) : '';
+
+  document.getElementById('billing-tbody').innerHTML = rows.length === 0
+    ? '<tr><td colspan="8" class="text-center text-muted py-3">無帳單紀錄</td></tr>'
+    : rows.map(function(r) {
+        return '<tr>'
+          +'<td>'+escHtml(String(r.date||''))+'</td>'
+          +'<td><span class="badge bg-secondary">'+escHtml(r.type||'')+'</span></td>'
+          +'<td>'+escHtml(r.job_name||'')+'</td>'
+          +'<td class="text-end">'+(r.qty!=null?r.qty:'')+'</td>'
+          +'<td class="text-end">'+(r.unit_fee!=null?'$'+parseFloat(r.unit_fee).toFixed(2):'')+'</td>'
+          +'<td class="text-end fw-bold">'+(r.total_fee!=null?'$'+parseFloat(r.total_fee).toFixed(2):'')+'</td>'
+          +'<td class="text-muted small">'+escHtml(r.note||'')+'</td>'
+          +'<td><button class="btn btn-xs btn-outline-danger py-0 px-1" style="font-size:.75rem;" onclick="confirmDeleteBilling('+r.id+')"><i class="bi bi-trash"></i></button></td>'
+          +'</tr>';
+      }).join('');
+}
+
+// ── Product Modal ─────────────────────────────────────────────────────────────
+function openProductModal(id) {
+  document.getElementById('p-error').style.display = 'none';
+  if (id) {
+    var p = S.products.find(function(x){ return x.id == id; });
+    if (!p) return;
+    document.getElementById('productModalTitle').textContent = '編輯產品';
+    document.getElementById('p-edit-id').value = p.id;
+    document.getElementById('p-name').value = p.name||'';
+    document.getElementById('p-sku').value  = p.sku||'';
+    document.getElementById('p-ean').value  = p.ean||'';
+    document.getElementById('p-asin').value = p.asin||'';
+    document.getElementById('p-cf').value   = p.cubic_feet_per_carton||'';
+    document.getElementById('p-qty').value  = p.qty_per_carton||'';
+    document.getElementById('p-note').value = p.note||'';
+  } else {
+    document.getElementById('productModalTitle').textContent = '新增產品';
+    document.getElementById('p-edit-id').value = '';
+    ['p-name','p-sku','p-ean','p-asin','p-cf','p-qty','p-note'].forEach(function(id){ document.getElementById(id).value=''; });
+  }
+  getModal('productModal').show();
+}
+
+function saveProduct() {
+  var name = document.getElementById('p-name').value.trim();
+  if (!name) {
+    document.getElementById('p-error').textContent = '產品名稱必填';
+    document.getElementById('p-error').style.display = '';
+    return;
+  }
+  var data = {
+    name: name,
+    sku:  document.getElementById('p-sku').value.trim(),
+    ean:  document.getElementById('p-ean').value.trim(),
+    asin: document.getElementById('p-asin').value.trim(),
+    cubic_feet_per_carton: document.getElementById('p-cf').value,
+    qty_per_carton: document.getElementById('p-qty').value,
+    note: document.getElementById('p-note').value.trim()
+  };
+  var editId = document.getElementById('p-edit-id').value;
+  if (editId) {
+    gasCall2('updateProduct', parseInt(editId), data, function(r) {
+      var p = S.products.find(function(x){ return x.id == editId; });
+      if (p) Object.assign(p, data);
+      getModal('productModal').hide();
+      renderAll();
+      showToast('產品已更新', 'success');
+    });
+  } else {
+    gasCall('addProduct', data, function(r) {
+      data.id = r.id;
+      S.products.push(data);
+      getModal('productModal').hide();
+      renderAll();
+      showToast('產品已新增', 'success');
+    });
+  }
+}
+
+function confirmDeleteProduct(id, name) {
+  if (!confirm('確定刪除產品「' + name + '」及其所有批次和異動記錄？')) return;
+  gasCall('deleteProduct', id, function() {
+    S.products = S.products.filter(function(p){ return p.id != id; });
+    S.batches  = S.batches.filter(function(b){ return b.product_id != id; });
+    S.movements = S.movements.filter(function(m){
+      return !S.batches.some ? true : true; // batches already filtered, movements orphaned ones stay in local but won't display
+    });
+    renderAll();
+    showToast('產品已刪除', 'success');
+  });
+}
+
+// ── Batch Modal ───────────────────────────────────────────────────────────────
+function openBatchModal(productId, productName) {
+  document.getElementById('b-product-id').value = productId;
+  document.getElementById('b-product-name').textContent = productName;
+  document.getElementById('b-exp').value = '';
+  document.getElementById('b-location').value = 'AMZLGS';
+  document.getElementById('b-cartons').value = '0';
+  document.getElementById('b-note').value = '';
+  getModal('batchModal').show();
+}
+
+function saveBatch() {
+  var productId = parseInt(document.getElementById('b-product-id').value);
+  var data = {
+    product_id: productId,
+    exp_date:   document.getElementById('b-exp').value,
+    location:   document.getElementById('b-location').value,
+    current_cartons: parseFloat(document.getElementById('b-cartons').value)||0,
+    note:        document.getElementById('b-note').value.trim()
+  };
+  gasCall('addBatch', data, function(r) {
+    data.id = r.id;
+    S.batches.push(data);
+    getModal('batchModal').hide();
+    renderAll();
+    showToast('批次已新增', 'success');
+  });
+}
+
+function confirmDeleteBatch(id, label) {
+  if (!confirm('確定刪除批次 ' + (label||id) + '？相關異動記錄也會一併刪除。')) return;
+  gasCall('deleteBatch', id, function() {
+    S.batches   = S.batches.filter(function(b){ return b.id != id; });
+    S.movements = S.movements.filter(function(m){ return m.batch_id != id; });
+    renderAll();
+    showToast('批次已刪除', 'success');
+  });
+}
+
+// ── Movement Modal ────────────────────────────────────────────────────────────
+function openMovementModal(prefillBatchId) {
+  // Populate batch selector
+  var opts = S.products.map(function(p) {
+    var batches = S.batches.filter(function(b){ return b.product_id == p.id; });
+    if (!batches.length) return '';
+    return '<optgroup label="' + escHtml(p.name) + '">'
+      + batches.map(function(b){
+          return '<option value="'+b.id+'"'+(prefillBatchId&&b.id==prefillBatchId?' selected':'')+'>'
+            +(b.exp_date||'無效期')+' | '+b.location+' | 現存:'+parseFloat(b.current_cartons).toFixed(1)+'箱'
+            +'</option>';
+        }).join('')
+      + '</optgroup>';
+  }).join('');
+  document.getElementById('m-batch-id').innerHTML = '<option value="">-- 選擇批次 --</option>' + opts;
+  document.getElementById('m-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('m-type').value = 'OUT_FBA';
+  document.getElementById('m-qty').value  = '';
+  document.getElementById('m-note').value = '';
+  getModal('movementModal').show();
+}
+
+function saveMovement() {
+  var batchId = parseInt(document.getElementById('m-batch-id').value);
+  var qty     = parseFloat(document.getElementById('m-qty').value);
+  if (!batchId || isNaN(qty) || qty <= 0) { showToast('請選擇批次並填入正確箱數', 'error'); return; }
+  var data = {
+    batch_id:    batchId,
+    date:        document.getElementById('m-date').value,
+    type:        document.getElementById('m-type').value,
+    qty_cartons: qty,
+    note:        document.getElementById('m-note').value.trim()
+  };
+  gasCall('addMovement', data, function(r) {
+    data.id = r.id;
+    data.qty_cartons = r.signed_qty;
+    S.movements.push(data);
+    // Update local batch cartons
+    var b = S.batches.find(function(x){ return x.id == batchId; });
+    if (b) b.current_cartons = Math.round(((parseFloat(b.current_cartons)||0) + r.signed_qty)*100)/100;
+    getModal('movementModal').hide();
+    renderAll();
+    showToast('異動已記錄', 'success');
+  });
+}
+
+// ── Billing Modal ─────────────────────────────────────────────────────────────
+function openBillingModal() {
+  document.getElementById('bl-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('bl-type').value = 'STORAGE';
+  ['bl-job','bl-qty','bl-unit','bl-total','bl-note'].forEach(function(id){ document.getElementById(id).value=''; });
+  getModal('billingModal').show();
+}
+
+function saveBilling() {
+  var date = document.getElementById('bl-date').value;
+  if (!date) { showToast('請填入日期', 'error'); return; }
+  var data = {
+    date:      date,
+    type:      document.getElementById('bl-type').value,
+    job_name:  document.getElementById('bl-job').value.trim(),
+    qty:       document.getElementById('bl-qty').value,
+    unit_fee:  document.getElementById('bl-unit').value,
+    total_fee: document.getElementById('bl-total').value,
+    note:      document.getElementById('bl-note').value.trim()
+  };
+  gasCall('addBilling', data, function(r) {
+    data.id = r.id;
+    S.billing.push(data);
+    getModal('billingModal').hide();
+    renderAll();
+    showToast('帳單已新增', 'success');
+  });
+}
+
+function confirmDeleteBilling(id) {
+  if (!confirm('確定刪除此帳單記錄？')) return;
+  gasCall('deleteBilling', id, function() {
+    S.billing = S.billing.filter(function(r){ return r.id != id; });
+    renderAll();
+    showToast('帳單已刪除', 'success');
+  });
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(msg, type) {
+  var el = document.createElement('div');
+  el.className = 'toast-item toast-' + (type||'info');
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(function(){ el.remove(); }, 3000);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function getModal(id) {
+  if (!_modals[id]) _modals[id] = new bootstrap.Modal(document.getElementById(id));
+  return _modals[id];
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function saveGasUrl() {
+  var url = document.getElementById('gasUrlInput').value.trim();
+  if (url) { GAS_URL = url; localStorage.setItem('lab52_gas_url',''); localStorage.setItem('lab52_gas_url', url); }
+  document.getElementById('local-url-area').style.display = 'none';
+  syncData();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(function init() {
+  if (GAS_MODE) {
+    document.getElementById('sync-mode-label').textContent = 'GAS 部署版（完整讀寫）';
+    syncData();
+  } else {
+    document.getElementById('sync-mode-label').textContent = '本機模式（需設定 GAS URL）';
+    document.getElementById('local-url-area').style.display = '';
+    if (GAS_URL) document.getElementById('gasUrlInput').value = GAS_URL;
+    // Load from localStorage cache
+    var cache = localStorage.getItem('lab52_cache');
+    if (cache) {
+      try { applyData(JSON.parse(cache)); showToast('已載入快取資料，點同步取得最新', 'info'); } catch(e){}
+    }
+  }
+})();
+</script>
+</body>
+</html>
