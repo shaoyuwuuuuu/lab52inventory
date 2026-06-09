@@ -868,22 +868,45 @@ function syncFbaInventory() {
   }
 }
 
+var FBA_HDR_ = ['SKU','ASIN','EAN','產品名稱','可出貨數量','入庫中','預留數量','最後更新','狀態','日均銷量','銷量更新日'];
+
 function writeFbaSheet_(summaries) {
   var ss = ss_();
   var sheet = ss.getSheetByName('FBA庫存');
   if (!sheet) {
     sheet = ss.insertSheet('FBA庫存');
-    var hdr = ['SKU','ASIN','EAN','產品名稱','可出貨數量','入庫中','預留數量','最後更新','狀態'];
-    sheet.getRange(1,1,1,hdr.length).setValues([hdr])
+    sheet.getRange(1,1,1,FBA_HDR_.length).setValues([FBA_HDR_])
       .setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff');
     sheet.setFrozenRows(1);
   }
 
-  if (sheet.getLastRow() > 1) sheet.getRange(2,1,sheet.getLastRow()-1,9).clearContent().clearFormat();
+  // 保留現有銷量資料（按 ASIN 鍵值）
+  var salesByAsin = {};
+  if (sheet.getLastRow() > 1) {
+    var ex = sheet.getDataRange().getValues();
+    var exHdr = ex[0].map(function(h){ return String(h).trim(); });
+    var eA = exHdr.indexOf('ASIN'), eS = exHdr.indexOf('日均銷量'), eD = exHdr.indexOf('銷量更新日');
+    if (eA >= 0) {
+      for (var ri = 1; ri < ex.length; ri++) {
+        var asinKey = String(ex[ri][eA]||'').trim();
+        if (asinKey) salesByAsin[asinKey] = {
+          sales: eS >= 0 ? ex[ri][eS] : '',
+          date:  eD >= 0 ? ex[ri][eD] : ''
+        };
+      }
+    }
+    sheet.getRange(2,1,sheet.getLastRow()-1, FBA_HDR_.length).clearContent().clearFormat();
+  }
+
+  // 確保標頭有 11 欄
+  var curHdr = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0].map(function(h){ return String(h).trim(); });
+  if (curHdr.length < FBA_HDR_.length) {
+    sheet.getRange(1,1,1,FBA_HDR_.length).setValues([FBA_HDR_])
+      .setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff');
+  }
 
   if (summaries.length === 0) return;
 
-  // ASIN → EAN 對照表（從庫存總覽）
   var asinToEan = {};
   readProducts_().forEach(function(p) { if (p.asin) asinToEan[p.asin] = p.ean || ''; });
 
@@ -895,14 +918,16 @@ function writeFbaSheet_(summaries) {
     var reserved    = (det.reservedQuantity && det.reservedQuantity.totalReservedQuantity) || 0;
     var status      = fulfillable <= 0 ? '❌ 缺貨' : (fulfillable < 50 ? '🟡 注意' : '✅ 正常');
     var ean         = asinToEan[s.asin] || '';
-    return [s.sellerSku||'', s.asin||'', ean, s.productName||'', fulfillable, inbound, reserved, now, status];
+    var saved       = salesByAsin[s.asin] || {};
+    return [s.sellerSku||'', s.asin||'', ean, s.productName||'', fulfillable, inbound, reserved, now, status,
+            saved.sales !== undefined ? saved.sales : '', saved.date || ''];
   });
 
-  sheet.getRange(2,1,rows.length,9).setValues(rows);
+  sheet.getRange(2,1,rows.length, FBA_HDR_.length).setValues(rows);
 
   for (var i = 0; i < rows.length; i++) {
     var bg = rows[i][4] <= 0 ? '#FFCCCC' : (rows[i][4] < 50 ? '#FFF3CC' : null);
-    if (bg) sheet.getRange(i+2, 1, 1, 9).setBackground(bg);
+    if (bg) sheet.getRange(i+2, 1, 1, FBA_HDR_.length).setBackground(bg);
   }
 }
 
@@ -940,6 +965,78 @@ function setupFbaTrigger() {
   return { ok: true };
 }
 
+// ── FBA 銷量同步（每週一次） ───────────────────────────────────────────────────
+// 執行步驟：
+//   1. 執行 syncFbaSalesVelocity() 立即同步一次
+//   2. 執行 setupSalesTrigger() 設定每週一早上自動同步
+function syncFbaSalesVelocity() {
+  var token  = getSpApiToken_();
+  var mktId  = PropertiesService.getScriptProperties().getProperty('AMAZON_MARKETPLACE_ID') || 'ATVPDKIKX0DER';
+  var sheet  = ss_().getSheetByName('FBA庫存');
+  if (!sheet || sheet.getLastRow() <= 1) {
+    Logger.log('FBA庫存 sheet 為空，請先執行 syncFbaInventory()');
+    return;
+  }
+
+  var data   = sheet.getDataRange().getValues();
+  var hdr    = data[0].map(function(h){ return String(h).trim(); });
+  var iAsin  = hdr.indexOf('ASIN');
+  var iSales = hdr.indexOf('日均銷量');
+  var iDate  = hdr.indexOf('銷量更新日');
+  if (iAsin < 0) { Logger.log('找不到 ASIN 欄位'); return; }
+
+  // 若欄位不存在則新增
+  if (iSales < 0) { iSales = hdr.length;   sheet.getRange(1, iSales+1).setValue('日均銷量').setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff'); }
+  if (iDate  < 0) { iDate  = iSales === hdr.length ? hdr.length+1 : hdr.length; sheet.getRange(1, iDate+1).setValue('銷量更新日').setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff'); }
+
+  // 過去 28 天區間
+  var now  = new Date();
+  var past = new Date(now.getTime() - 28 * 24 * 3600 * 1000);
+  function iso(d) { return d.toISOString().slice(0,19) + 'Z'; }
+  var interval = iso(past) + '--' + iso(now);
+  var today    = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+  var updated = 0, failed = 0;
+  for (var i = 1; i < data.length; i++) {
+    var asin = String(data[i][iAsin] || '').trim();
+    if (!asin) continue;
+
+    var url = 'https://sellingpartnerapi-na.amazon.com/sales/v1/orderMetrics'
+      + '?marketplaceIds=' + mktId
+      + '&interval=' + encodeURIComponent(interval)
+      + '&granularity=total'
+      + '&asin=' + asin;
+
+    var resp = UrlFetchApp.fetch(url, {
+      headers: { 'x-amz-access-token': token, 'Content-Type': 'application/json' },
+      muteHttpExceptions: true
+    });
+
+    if (resp.getResponseCode() === 200) {
+      var payload = JSON.parse(resp.getContentText()).payload || [];
+      var units   = payload.length > 0 ? (Number(payload[0].unitCount) || 0) : 0;
+      var daily   = Math.round((units / 28) * 10) / 10;
+      sheet.getRange(i+1, iSales+1).setValue(daily);
+      sheet.getRange(i+1, iDate+1).setValue(today);
+      updated++;
+    } else {
+      Logger.log('ASIN ' + asin + ' 失敗: HTTP ' + resp.getResponseCode());
+      failed++;
+    }
+    Utilities.sleep(2100); // 尊重 0.5 req/s 限制
+  }
+  Logger.log('銷量同步完成：' + updated + ' 筆更新，' + failed + ' 筆失敗');
+}
+
+function setupSalesTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'syncFbaSalesVelocity') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('syncFbaSalesVelocity')
+    .timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(7).create();
+  Logger.log('銷量自動同步 Trigger 已設定（每週一早上 7 點）');
+}
+
 // ── 診斷：確認各分頁欄位與資料狀況 ────────────────────────────────────────────
 // 執行後到 執行記錄 查看輸出，確認 EAN 是否正確讀入
 function debugData() {
@@ -970,4 +1067,51 @@ function debugData() {
   Logger.log('產品前3 EAN: ' + JSON.stringify(productEans.slice(0,3)));
   Logger.log('Movement前3 EAN: ' + JSON.stringify(movEans.slice(0,3)));
   return { products: productEans.length, movementEans: movEans.length, matched: matched.length };
+}
+
+// ── 測試 Sales API 是否有權限 ─────────────────────────────────────────────────
+// 執行此函式，在 Logs 看結果:
+//   200 → 有權限，可以串銷量
+//   403 → App 沒有 Selling Partner Insights 角色，需在 Developer Central 新增
+//   其他 → 其他問題
+function diagSalesApi() {
+  var token = getSpApiToken_();
+  var mktId = PropertiesService.getScriptProperties().getProperty('AMAZON_MARKETPLACE_ID') || 'ATVPDKIKX0DER';
+
+  // 取第一個 ASIN 來測試（從 FBA庫存 sheet）
+  var fbaSheet = ss_().getSheetByName('FBA庫存');
+  var testAsin = '';
+  if (fbaSheet && fbaSheet.getLastRow() > 1) {
+    var asinCol = fbaSheet.getRange(1,1,1,fbaSheet.getLastColumn()).getValues()[0].indexOf('ASIN');
+    if (asinCol >= 0) testAsin = String(fbaSheet.getRange(2, asinCol+1).getValue() || '');
+  }
+  if (!testAsin) { Logger.log('找不到 ASIN，請先執行 syncFbaInventory()'); return; }
+
+  // 查詢最近 30 天銷量
+  var now  = new Date();
+  var past = new Date(now.getTime() - 30 * 24 * 3600 * 1000);
+  function iso(d) { return d.toISOString().slice(0,19) + 'Z'; }
+  var interval = iso(past) + '--' + iso(now);
+
+  var url = 'https://sellingpartnerapi-na.amazon.com/sales/v1/orderMetrics'
+    + '?marketplaceIds=' + mktId
+    + '&interval=' + encodeURIComponent(interval)
+    + '&granularity=total'
+    + '&asin=' + testAsin;
+
+  var resp = UrlFetchApp.fetch(url, {
+    headers: { 'x-amz-access-token': token, 'Content-Type': 'application/json' },
+    muteHttpExceptions: true
+  });
+
+  Logger.log('HTTP 狀態: ' + resp.getResponseCode());
+  Logger.log('回應內容: ' + resp.getContentText().slice(0, 500));
+
+  if (resp.getResponseCode() === 200) {
+    Logger.log('✅ Sales API 可用！可以開始串銷量。');
+  } else if (resp.getResponseCode() === 403) {
+    Logger.log('❌ 403 權限不足 — 請至 Amazon Developer Central 替 App 新增「Selling Partner Insights」角色。');
+  } else {
+    Logger.log('⚠️ 其他錯誤，請查看回應內容。');
+  }
 }
