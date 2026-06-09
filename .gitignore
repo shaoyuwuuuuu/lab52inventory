@@ -19,3 +19,6 @@ _new_extracted/
 # old Node.js app
 app/
 public/
+
+# credentials / secrets
+*.txt

@@ -29,7 +29,11 @@ function doGet(e) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function ss_() { return SpreadsheetApp.getActiveSpreadsheet(); }
+function ss_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (ss) return ss;
+  return SpreadsheetApp.openById('1McIxZVNBnBBmrLnJ0T5d30PLODcgcKiZRASeTobMSww');
+}
 
 function insertAtTop_(sheet, rowData) {
   sheet.insertRowAfter(1);
@@ -68,14 +72,39 @@ function findRow_(sheet, id) {
 
 // ── Main Data ─────────────────────────────────────────────────────────────────
 
+function diagConnection() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    Logger.log('getActiveSpreadsheet: ' + (ss ? ss.getName() : 'NULL'));
+    if (!ss) {
+      ss = SpreadsheetApp.openById('1McIxZVNBnBBmrLnJ0T5d30PLODcgcKiZRASeTobMSww');
+      Logger.log('openById: ' + (ss ? ss.getName() : 'FAILED'));
+    }
+    var sheets = ss.getSheets().map(function(s){ return s.getName(); });
+    Logger.log('Sheets: ' + sheets.join(', '));
+    var data = getAllData();
+    Logger.log('products: ' + data.products.length + ' movements: ' + data.movements.length);
+    return { ok: true, sheets: sheets, products: data.products.length };
+  } catch(e) {
+    Logger.log('diagConnection ERROR: ' + e.message);
+    return { error: e.message };
+  }
+}
+
 function getAllData() {
-  return {
-    products:  readProducts_(),
-    movements: readMovements_(),
-    taiwan:    readTaiwanMovements_(),
-    transits:  readSheet_('Transits'),
-    billing:   readSheet_('Billing')
+  function safe(fn, name) {
+    try { return fn(); }
+    catch(e) { Logger.log('[getAllData] ' + name + ' ERROR: ' + e.message); return []; }
+  }
+  var result = {
+    products:  safe(readProducts_,        'readProducts'),
+    movements: safe(readMovements_,       'readMovements'),
+    taiwan:    safe(readTaiwanMovements_, 'readTaiwanMovements'),
+    transits:  safe(function(){ return readSheet_('Transits'); }, 'readSheet_Transits'),
+    billing:   safe(function(){ return readSheet_('Billing'); },  'readSheet_Billing'),
+    fba:       safe(readFbaInventory_,    'readFbaInventory')
   };
+  return result;
 }
 
 function readProducts_() {
@@ -764,6 +793,151 @@ function writeOverviewFormulas() {
     : '完成：' + count + ' 列公式寫入成功';
   Logger.log(msg);
   return { ok: errors.length === 0, count: count, errors: errors };
+}
+
+// ── Amazon SP-API FBA 庫存同步 ────────────────────────────────────────────────
+//
+// 使用步驟：
+//   1. 執行 setupFbaCredentials()，把 LAB52 API.txt 的三組憑證填入後執行一次
+//   2. 執行 syncFbaInventory() 測試是否成功
+//   3. 執行 setupFbaTrigger() 設定每小時自動同步
+
+function setupFbaCredentials() {
+  PropertiesService.getScriptProperties().setProperties({
+    'AMAZON_CLIENT_ID':     '在此貼上 Client ID',
+    'AMAZON_CLIENT_SECRET': '在此貼上 Client Secret',
+    'AMAZON_REFRESH_TOKEN': '在此貼上 LWA Refresh Token',
+    'AMAZON_MARKETPLACE_ID': 'ATVPDKIKX0DER'
+  });
+  Logger.log('FBA 憑證已儲存至 PropertiesService');
+}
+
+function getSpApiToken_() {
+  var p = PropertiesService.getScriptProperties();
+  var resp = UrlFetchApp.fetch('https://api.amazon.com/auth/o2/token', {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    payload: {
+      grant_type:    'refresh_token',
+      refresh_token: p.getProperty('AMAZON_REFRESH_TOKEN'),
+      client_id:     p.getProperty('AMAZON_CLIENT_ID'),
+      client_secret: p.getProperty('AMAZON_CLIENT_SECRET')
+    },
+    muteHttpExceptions: true
+  });
+  var data = JSON.parse(resp.getContentText());
+  if (!data.access_token) throw new Error('Token 取得失敗: ' + resp.getContentText());
+  return data.access_token;
+}
+
+function syncFbaInventory() {
+  try {
+    var token = getSpApiToken_();
+    var marketplaceId = PropertiesService.getScriptProperties()
+      .getProperty('AMAZON_MARKETPLACE_ID') || 'ATVPDKIKX0DER';
+
+    var url = 'https://sellingpartnerapi-na.amazon.com/fba/inventory/v1/summaries'
+      + '?granularityType=Marketplace'
+      + '&granularityId=' + marketplaceId
+      + '&marketplaceIds=' + marketplaceId
+      + '&details=true';
+
+    var resp = UrlFetchApp.fetch(url, {
+      method: 'get',
+      headers: { 'x-amz-access-token': token, 'Content-Type': 'application/json' },
+      muteHttpExceptions: true
+    });
+
+    var code = resp.getResponseCode();
+    if (code !== 200) throw new Error('API 錯誤 ' + code + ': ' + resp.getContentText());
+
+    var summaries = JSON.parse(resp.getContentText()).payload.inventorySummaries || [];
+
+    // 只保留 庫存總覽 裡有的 ASIN（不在追蹤清單的自動排除）
+    var trackedAsins = readProducts_().map(function(p) { return p.asin; }).filter(Boolean);
+    if (trackedAsins.length > 0) {
+      summaries = summaries.filter(function(s) { return trackedAsins.indexOf(s.asin) >= 0; });
+    }
+
+    writeFbaSheet_(summaries);
+    Logger.log('FBA 庫存同步完成：' + summaries.length + ' 筆');
+    return { ok: true, count: summaries.length };
+  } catch(e) {
+    Logger.log('syncFbaInventory 錯誤：' + e.message);
+    return { error: e.message };
+  }
+}
+
+function writeFbaSheet_(summaries) {
+  var ss = ss_();
+  var sheet = ss.getSheetByName('FBA庫存');
+  if (!sheet) {
+    sheet = ss.insertSheet('FBA庫存');
+    var hdr = ['SKU','ASIN','EAN','產品名稱','可出貨數量','入庫中','預留數量','最後更新','狀態'];
+    sheet.getRange(1,1,1,hdr.length).setValues([hdr])
+      .setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+  }
+
+  if (sheet.getLastRow() > 1) sheet.getRange(2,1,sheet.getLastRow()-1,9).clearContent().clearFormat();
+
+  if (summaries.length === 0) return;
+
+  // ASIN → EAN 對照表（從庫存總覽）
+  var asinToEan = {};
+  readProducts_().forEach(function(p) { if (p.asin) asinToEan[p.asin] = p.ean || ''; });
+
+  var now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+  var rows = summaries.map(function(s) {
+    var det = s.inventoryDetails || {};
+    var fulfillable = det.fulfillableQuantity || 0;
+    var inbound     = det.inboundShippedQuantity || 0;
+    var reserved    = (det.reservedQuantity && det.reservedQuantity.totalReservedQuantity) || 0;
+    var status      = fulfillable <= 0 ? '❌ 缺貨' : (fulfillable < 50 ? '🟡 注意' : '✅ 正常');
+    var ean         = asinToEan[s.asin] || '';
+    return [s.sellerSku||'', s.asin||'', ean, s.productName||'', fulfillable, inbound, reserved, now, status];
+  });
+
+  sheet.getRange(2,1,rows.length,9).setValues(rows);
+
+  for (var i = 0; i < rows.length; i++) {
+    var bg = rows[i][4] <= 0 ? '#FFCCCC' : (rows[i][4] < 50 ? '#FFF3CC' : null);
+    if (bg) sheet.getRange(i+2, 1, 1, 9).setBackground(bg);
+  }
+}
+
+function readFbaInventory_() {
+  var sheet = ss_().getSheetByName('FBA庫存');
+  if (!sheet || sheet.getLastRow() <= 1) return [];
+  var vals = sheet.getDataRange().getValues();
+  var hdr  = vals[0].map(function(h) { return String(h).trim(); });
+  var tz   = Session.getScriptTimeZone();
+  return vals.slice(1).filter(function(r) { return r[0]; }).map(function(r) {
+    var obj = {};
+    hdr.forEach(function(h,j) {
+      var v = r[j];
+      if (v instanceof Date) obj[h] = Utilities.formatDate(v, tz, 'yyyy-MM-dd HH:mm');
+      else obj[h] = (v === '' || v === null || v === undefined) ? null : v;
+    });
+    return obj;
+  });
+}
+
+function resetFbaSheet() {
+  var ss = ss_();
+  var sheet = ss.getSheetByName('FBA庫存');
+  if (sheet) ss.deleteSheet(sheet);
+  Logger.log('FBA庫存 分頁已刪除，請執行 syncFbaInventory() 重建');
+  return syncFbaInventory();
+}
+
+function setupFbaTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'syncFbaInventory') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('syncFbaInventory').timeBased().everyHours(1).create();
+  Logger.log('FBA 自動同步 Trigger 已設定（每小時）');
+  return { ok: true };
 }
 
 // ── 診斷：確認各分頁欄位與資料狀況 ────────────────────────────────────────────
