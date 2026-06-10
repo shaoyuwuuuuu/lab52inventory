@@ -129,6 +129,15 @@ function readProducts_() {
   var iQpc  = colIdx(['每箱pcs','每箱PCS'],          4);
   var iBox  = colIdx(['在倉總箱數'],                -1); // formula-computed total
 
+  // Fuzzy match: any header containing '組件' or 'component' (case-insensitive)
+  var iComp = -1;
+  for (var hi = 0; hi < hdr.length; hi++) {
+    var hl = hdr[hi].toLowerCase();
+    if (hl.indexOf('組件') >= 0 || hl.indexOf('组件') >= 0 || hl.indexOf('component') >= 0) {
+      iComp = hi; break;
+    }
+  }
+
   var result = [];
   for (var i = 1; i < vals.length; i++) {
     var r = vals[i];
@@ -144,10 +153,27 @@ function readProducts_() {
       ean:            ean,
       asin:           String(r[iAsin] || '').trim(),
       qty_per_carton: parseInt(r[iQpc]) || 0,
-      boxes:          iBox >= 0 ? (parseFloat(r[iBox]) || 0) : 0
+      boxes:          iBox >= 0 ? (parseFloat(r[iBox]) || 0) : 0,
+      components:     iComp >= 0 ? String(r[iComp] || '').trim() : ''
     });
   }
   return result;
+}
+
+function debugProducts() {
+  var sheet = ss_().getSheetByName('庫存總覽');
+  var vals  = sheet.getDataRange().getValues();
+  var hdr   = vals[0].map(function(h){ return String(h).trim(); });
+  var iComp = -1;
+  for (var hi = 0; hi < hdr.length; hi++) {
+    var hl = hdr[hi].toLowerCase();
+    if (hl.indexOf('組件') >= 0 || hl.indexOf('component') >= 0) { iComp = hi; break; }
+  }
+  return { headers: hdr, iComp: iComp,
+    products: vals.slice(1).map(function(r){
+      return { name: String(r[0]||''), ean: String(r[2]||''), comp: iComp>=0 ? String(r[iComp]||'') : 'COL_NOT_FOUND' };
+    }).filter(function(p){ return p.name; })
+  };
 }
 
 function readMovements_() {
@@ -989,9 +1015,9 @@ function syncFbaSalesVelocity() {
   if (iSales < 0) { iSales = hdr.length;   sheet.getRange(1, iSales+1).setValue('日均銷量').setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff'); }
   if (iDate  < 0) { iDate  = iSales === hdr.length ? hdr.length+1 : hdr.length; sheet.getRange(1, iDate+1).setValue('銷量更新日').setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff'); }
 
-  // 過去 28 天區間
+  // 過去 4 天區間
   var now  = new Date();
-  var past = new Date(now.getTime() - 28 * 24 * 3600 * 1000);
+  var past = new Date(now.getTime() - 4 * 24 * 3600 * 1000);
   function iso(d) { return d.toISOString().slice(0,19) + 'Z'; }
   var interval = iso(past) + '--' + iso(now);
   var today    = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd');
@@ -1015,7 +1041,7 @@ function syncFbaSalesVelocity() {
     if (resp.getResponseCode() === 200) {
       var payload = JSON.parse(resp.getContentText()).payload || [];
       var units   = payload.length > 0 ? (Number(payload[0].unitCount) || 0) : 0;
-      var daily   = Math.round((units / 28) * 10) / 10;
+      var daily   = Math.round((units / 4) * 10) / 10;
       sheet.getRange(i+1, iSales+1).setValue(daily);
       sheet.getRange(i+1, iDate+1).setValue(today);
       updated++;
@@ -1033,8 +1059,132 @@ function setupSalesTrigger() {
     if (t.getHandlerFunction() === 'syncFbaSalesVelocity') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('syncFbaSalesVelocity')
-    .timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(7).create();
-  Logger.log('銷量自動同步 Trigger 已設定（每週一早上 7 點）');
+    .timeBased().everyDays(4).atHour(7).create();
+  Logger.log('銷量自動同步 Trigger 已設定（每4天早上 7 點）');
+}
+
+// ── 補貨提醒 Email ────────────────────────────────────────────────────────────
+//
+// 設定步驟：
+//   1. 執行 setupRestockAlertTrigger() 一次，設定每天早上 9 點自動發信
+//   2. 執行 sendRestockAlert() 可立即手動測試
+//   3. 執行 removeRestockAlertTrigger() 可取消定時發信
+
+var RESTOCK_ALERT_EMAIL   = 'shaoyu427@gmail.com';
+var RESTOCK_TARGET_DAYS   = 90;   // 低於此天數才發警示
+var RESTOCK_URGENT_DAYS   = 28;   // 低於此天數標記為緊急
+
+function sendRestockAlert() {
+  var products = readProducts_();
+  var fbaRows  = readFbaInventory_();
+  var transits = readSheet_('Transits');
+
+  var fbaByAsin = {};
+  fbaRows.forEach(function(r) { if (r['ASIN']) fbaByAsin[r['ASIN']] = r; });
+
+  // 在途（非台灣方向）的箱數
+  var transitBoxByEan = {};
+  transits.filter(function(t) {
+    return t.status === 'TRANSIT' && (t.to_location || '').toUpperCase() !== 'TW';
+  }).forEach(function(t) {
+    transitBoxByEan[t.ean] = (transitBoxByEan[t.ean] || 0) + (parseFloat(t.qty_cartons) || 0);
+  });
+
+  // 台灣倉庫存
+  var twBoxByEan = {};
+  readTaiwanMovements_().forEach(function(m) {
+    twBoxByEan[m.ean] = (twBoxByEan[m.ean] || 0) + (parseFloat(m.boxes) || 0);
+  });
+
+  var alerts = [];
+  products.forEach(function(p) {
+    if (!p.asin) return;
+    var fba   = fbaByAsin[p.asin]; if (!fba) return;
+    var daily = Number(fba['日均銷量'] || 0); if (!daily) return;
+    var qpc   = parseFloat(p.qty_per_carton) || 1;
+
+    var fbaQty      = parseFloat(fba['可出貨數量'] || 0);
+    var transitQty  = (transitBoxByEan[p.ean] || 0) * qpc;
+    var effectiveQty = fbaQty + transitQty;
+    var days = Math.round(effectiveQty / daily);
+    if (days >= RESTOCK_TARGET_DAYS) return;
+
+    var shipBoxes = Math.ceil(Math.max(0, daily * RESTOCK_TARGET_DAYS - effectiveQty) / qpc / 5) * 5;
+    var twStock   = twBoxByEan[p.ean] || 0;
+    var source    = twStock >= shipBoxes ? '台灣倉' : (twStock > 0 ? '台灣倉（不足）' : '外倉');
+
+    alerts.push({
+      name: p.name, ean: p.ean, sku: p.sku, asin: p.asin,
+      days: days, shipBoxes: shipBoxes, fbaQty: Math.round(fbaQty),
+      daily: daily, source: source
+    });
+  });
+
+  if (alerts.length === 0) {
+    Logger.log('[RestockAlert] 所有產品庫存充足，不發信');
+    return { ok: true, sent: false, reason: 'no alerts' };
+  }
+
+  alerts.sort(function(a, b) { return a.days - b.days; });
+
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var subject = '[Lab52 補貨提醒] ' + today + '：' + alerts.length + ' 項產品需要補貨';
+
+  // ── 純文字版 ──
+  var text = '以下產品 FBA 庫存低於 ' + RESTOCK_TARGET_DAYS + ' 天，請安排補貨：\n\n';
+  alerts.forEach(function(a) {
+    text += (a.days < RESTOCK_URGENT_DAYS ? '🔴 緊急' : '🟡 警示') + '  ' + a.name + '\n';
+    text += '  剩餘天數：' + a.days + ' 天 ｜ 建議補：' + a.shipBoxes + ' 箱 ｜ 備貨來源：' + a.source + '\n';
+    text += '  ASIN：' + a.asin + ' ｜ SKU：' + a.sku + '\n\n';
+  });
+  text += '\n— Lab52 庫存系統自動發送';
+
+  // ── HTML 版 ──
+  var rows = alerts.map(function(a) {
+    var color = a.days < RESTOCK_URGENT_DAYS ? '#C0392B' : '#E67E22';
+    var label = a.days < RESTOCK_URGENT_DAYS ? '緊急' : '警示';
+    return '<tr>'
+      + '<td style="padding:6px 10px"><span style="background:' + color + ';color:#fff;padding:2px 7px;border-radius:4px;font-size:12px">' + label + '</span></td>'
+      + '<td style="padding:6px 10px;font-weight:600">' + a.name + '</td>'
+      + '<td style="padding:6px 10px;text-align:center;color:' + color + ';font-weight:700">' + a.days + ' 天</td>'
+      + '<td style="padding:6px 10px;text-align:center;font-weight:700">' + a.shipBoxes + ' 箱</td>'
+      + '<td style="padding:6px 10px;color:#555">' + a.source + '</td>'
+      + '<td style="padding:6px 10px;color:#888;font-size:12px">' + a.asin + '</td>'
+      + '</tr>';
+  }).join('');
+
+  var html = '<div style="font-family:system-ui,sans-serif;max-width:700px">'
+    + '<h2 style="color:#2D5016;margin-bottom:4px">Lab52 補貨提醒</h2>'
+    + '<p style="color:#666;margin-top:0">' + today + '　共 <b>' + alerts.length + '</b> 項產品需要補貨</p>'
+    + '<table style="border-collapse:collapse;width:100%;background:#fff;border:1px solid #ddd;border-radius:6px">'
+    + '<thead><tr style="background:#2D5016;color:#fff">'
+    + '<th style="padding:8px 10px">狀態</th><th style="padding:8px 10px">產品名稱</th>'
+    + '<th style="padding:8px 10px">剩餘天數</th><th style="padding:8px 10px">建議補貨</th>'
+    + '<th style="padding:8px 10px">備貨來源</th><th style="padding:8px 10px">ASIN</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table>'
+    + '<p style="color:#999;font-size:12px;margin-top:16px">此信件由 Lab52 庫存系統自動發送（目標天數：' + RESTOCK_TARGET_DAYS + ' 天）</p>'
+    + '</div>';
+
+  GmailApp.sendEmail(RESTOCK_ALERT_EMAIL, subject, text, { htmlBody: html });
+  Logger.log('[RestockAlert] 已發送至 ' + RESTOCK_ALERT_EMAIL + '，共 ' + alerts.length + ' 項');
+  return { ok: true, sent: true, count: alerts.length };
+}
+
+function setupRestockAlertTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'sendRestockAlert') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('sendRestockAlert').timeBased().everyDays(1).atHour(9).create();
+  Logger.log('[RestockAlert] Trigger 已設定：每天早上 9 點');
+  return { ok: true };
+}
+
+function removeRestockAlertTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'sendRestockAlert') ScriptApp.deleteTrigger(t);
+  });
+  Logger.log('[RestockAlert] Trigger 已取消');
+  return { ok: true };
 }
 
 // ── 診斷：確認各分頁欄位與資料狀況 ────────────────────────────────────────────

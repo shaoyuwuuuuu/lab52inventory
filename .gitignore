@@ -9,8 +9,6 @@ node_modules/
 *.xls
 *.xlsx
 
-# clasp generated output (source is inventory_app.html)
-index.html
 
 # temp extraction folders
 _*/
