@@ -27,26 +27,26 @@ img  { max-width: 100%; display: block; }
 .wf { max-width: 960px; margin: 0 auto; padding: 0 28px; }
 
 /* ── hero ── */
-.hero { background: var(--accent); padding: 48px 0 80px; position: relative; overflow: hidden; }
-.hero .w { padding-left: 8px; }
-.hero-logo { height:160px; margin-bottom:40px; filter:invert(1) brightness(2); opacity:.9; display:block; }
+.hero { background: var(--accent); padding: 20px 0 32px; position: relative; overflow: hidden; }
+.hero .w { padding-left: 0; }
+.hero-logo { height:160px; margin-bottom:5px; margin-left:-14px; filter:invert(1) brightness(2); opacity:.9; display:block; }
 .hero h1  { font-size:clamp(26px,5vw,42px); font-weight:800; color:#fff; line-height:1.25; max-width:580px; margin-bottom:22px; }
 .hero-sub { font-size:17px; color:#aad4d0; max-width:500px; line-height:1.9; }
-.hero-meta { margin-top:40px; font-size:13px; color:rgba(255,255,255,.35); letter-spacing:.04em; }
+.hero-meta { margin-top:40px; font-size:15px; color:rgba(255,255,255,.35); letter-spacing:.04em; }
 .hero-meta strong { color:rgba(255,255,255,.6); font-weight:500; }
 
 /* ── chapter divider ── */
-.ch-divider { background:var(--bg3); padding:56px 0; text-align:center; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+.ch-divider { background:var(--bg3); padding:48px 0; text-align:center; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
 .ch-divider .ch-num  { font-size:11px; font-weight:700; letter-spacing:.18em; text-transform:uppercase; color:var(--teal); margin-bottom:10px; }
 .ch-divider h2 { font-size:clamp(24px,4vw,36px); font-weight:800; color:var(--accent); margin-bottom:10px; }
 .ch-divider p  { font-size:16px; color:var(--muted); max-width:480px; margin:0 auto; }
 
 /* ── timeline within a chapter ── */
-.chapter { padding: 64px 0; }
+.chapter { padding: 52px 0; }
 .tl { position:relative; padding-left:44px; }
 .tl::before { content:''; position:absolute; left:12px; top:8px; bottom:8px; width:2px; background:var(--border); }
 
-.step { position:relative; margin-bottom:60px; }
+.step { position:relative; margin-bottom:44px; }
 .step:last-child { margin-bottom:0; }
 .step-dot {
   position:absolute; left:-38px; top:7px;
@@ -212,8 +212,8 @@ footer strong { color:#fff; }
 .ba-after  .ba-item::before { content:'✓'; color:#1d6b52; font-size:11px; margin-top:3px; flex-shrink:0; }
 
 /* ── cta ── */
-.cta-btn  { display:inline-flex; align-items:center; gap:8px; background:var(--accent); color:#fff; padding:12px 24px; border-radius:9px; font-size:14px; font-weight:700; text-decoration:none; transition:opacity .15s; }
-.cta-btn:hover { opacity:.82; }
+.cta-btn  { display:inline-flex; align-items:center; gap:8px; background:var(--warm); color:#fff; padding:13px 28px; border-radius:9px; font-size:15px; font-weight:700; text-decoration:none; transition:all .2s; box-shadow:0 3px 14px rgba(196,124,69,.35); letter-spacing:.01em; }
+.cta-btn:hover { background:#d4884f; transform:translateY(-3px); box-shadow:0 8px 24px rgba(196,124,69,.5); }
 
 /* CORS error mockup */
 .err-mock { background:#1e1e1e; padding:14px 16px; font-family:'Menlo','Consolas',monospace; font-size:12px; line-height:1.8; }
@@ -238,9 +238,9 @@ footer strong { color:#fff; }
     <h1>不懂如何寫程式的人<br>如何在18天做出兩套實用工具</h1>
 
     <!-- EDIT: 副標題 -->
-    <p class="hero-sub">工作上需要整合管理的資訊越來越多，我思考了要如何讓團隊工作流程更順利，也想了解AI的世界有什麼是我能接軌的。於是我開啟Youtube的教學影片下載終端機後，開始寫程式之旅。<br>我懂業務、懂使用者需求，所以我嘗試提出需求，讓AI 出工程。<br>以下是精簡的過程紀錄。</p>
+    <p class="hero-sub">工作上需要整合管理的資訊越來越多，我思考了要如何讓團隊工作流程更順利，也想了解AI的世界有什麼是我能接軌的。於是我開啟Youtube的教學影片下載終端機後，開始寫程式之旅。<br>我懂業務、懂使用者需求，所以我嘗試提出需求，讓AI 出工程。<br>以下是這段旅程中，最精簡的過程紀錄。</p>
 
-    <p class="hero-meta"><strong>Vibe Coding</strong> &nbsp;·&nbsp; Google Apps Script &nbsp;·&nbsp; $0 / 月</p>
+    <p class="hero-meta"><strong>拓華 AI 競賽</strong> &nbsp;·&nbsp; June 2026 &nbsp;·&nbsp; Annice Wu</p>
   </div>
 </section>
 
@@ -303,7 +303,7 @@ footer strong { color:#fff; }
 
         <div class="pq">
           <!-- EDIT: 引用 -->
-          <p>「那既然我們都知道痛點與需求了，那就讓AI 負責工程吧我想。」</p>
+          <p>「既然我們都知道痛點與需求了，那就讓 AI 負責工程吧我想。」</p>
         </div>
       </div>
 
@@ -332,7 +332,7 @@ footer strong { color:#fff; }
         <h2>每天開啟，待辦自動出現</h2>
 
         <!-- EDIT: 段落 -->
-        <p>最核心的功能：每天開啟 App，系統自動比對所有 KOL 資料，依照業務規則生成當天待辦。哪些規則、幾天前觸發自己決定，因為 AI 不懂我們的業務流程。</p>
+        <p>最核心的功能：每天開啟 App，系統自動比對所有 KOL 資料，依照業務規則生成當天待辦。定義清楚哪些規則、幾天前觸發，因為 AI 不懂我們的業務流程。</p>
 
         <div class="feat">
           <div class="feat-screen">
@@ -388,7 +388,7 @@ footer strong { color:#fff; }
         <div class="step-date">Day 3–4 — Sidebar</div>
 
         <!-- EDIT: 標題 -->
-        <h2>從看到提醒，到發出聯絡，不離開頁面</h2>
+        <h2>從檢視到提醒，到發出聯絡，不離開頁面</h2>
 
         <!-- EDIT: 段落 -->
         <p>執行的過程，我不斷以使用者角度出發，所有操作上的細節都需要注意，必須不斷反覆的思考如何讓使用更便利，這個工具才有意義</p>
@@ -449,7 +449,7 @@ footer strong { color:#fff; }
         <div class="step-date">Day 4–5 — Posts Calendar</div>
 
         <!-- EDIT: 標題 -->
-        <h2>既然聯絡表都完成了，那就把排程也加入吧</h2>
+        <h2>既然追蹤表都完成了，那就把排程也加入吧</h2>
 
         <!-- EDIT: 段落 -->
         <p>在初期只是想要更方便管理KOC，但接著發現那何不把社群的會碰到的資訊都搬上來呢？每個月都有貼文排程，可以新增客製化的行事曆讓使用者更好追蹤記錄</p>
@@ -780,7 +780,7 @@ footer strong { color:#fff; }
               <span class="feat-url">Lab52 庫存系統 — Hover 快速預覽</span>
             </div>
             <!-- EDIT: 截圖路徑 -->
-            <img src="Hover顯示.png" alt="Hover 快速預覽">
+            <img src="Hover顯示.png" alt="Hover 快速預覽" style="object-fit:contain; background:var(--bg3);">
           </div>
           <div class="feat-body">
             <span class="feat-tag">UX 細節</span>
@@ -930,7 +930,7 @@ footer strong { color:#fff; }
       </div>
     </div>
 
-    <h2 style="font-size:22px;color:var(--accent);margin:44px 0 18px;">我決定什麼，AI 決定什麼</h2>
+    <h2 style="font-size:clamp(18px,3vw,22px);color:var(--accent);margin:28px 0 12px;">我決定什麼，AI 決定什麼</h2>
 
     <div class="div2">
       <div class="div-col">
@@ -962,8 +962,6 @@ footer strong { color:#fff; }
       </div>
     </div>
 
-    <!-- EDIT: 備注 -->
-    <p style="font-size:14px;color:var(--muted);margin-top:14px;">我沒有要求安全防護，AI 自己加了。我說日期選擇器太醜，AI 重做了一個。我說要美國假日，AI 自己算了浮動算法。</p>
 
   </div>
 </section>
@@ -972,19 +970,22 @@ footer strong { color:#fff; }
 <!-- ══════════════════════════════════════
   CLOSING
 ══════════════════════════════════════ -->
-<section class="closing">
-  <div class="w">
-    <p style="font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:var(--teal);margin-bottom:14px;">Key Takeaway</p>
+<section class="closing" style="padding:60px 0; background:var(--bg2);">
+  <div class="w" style="text-align:center;">
+    <p style="font-size:12px; font-weight:700; letter-spacing:.2em; text-transform:uppercase; color:var(--warm); margin-bottom:20px;">Core Philosophy</p>
 
-    <!-- EDIT: 結語標題 -->
-    <h2>Vibe Coding 不是「讓 AI 寫程式」</h2>
+    <h2 style="font-size:32px; color:var(--accent); margin-bottom:32px; line-height:1.4;">
+      「AI 時代最貴的不是技術，<br>而是知道自己要做什麼。」
+    </h2>
 
-    <!-- EDIT: 結語內文 -->
-    <p>
-      是讓一個懂業務、懂使用者的人，<br>
-      能夠把腦子裡的設計直接變成上線的工具。<br><br>
-      你不需要變成工程師。<br>
-      你需要清楚知道你要解決什麼問題。
+    <hr style="border:none; border-top:1px solid var(--border); width:60px; margin:0 auto 32px auto;">
+
+    <p style="font-size:11px; font-weight:700; letter-spacing:.15em; text-transform:uppercase; color:var(--teal); margin-bottom:14px;">Key Takeaway</p>
+
+    <p style="font-size:17px; color:var(--muted); max-width:520px; margin:0 auto; line-height:1.85;">
+      我沒有學過程式，但我很清楚自己要解決什麼問題。<br><br>
+      比起在 AI 快速崛起的時代下焦慮，<br>
+      更重要的是持續培養邏輯思考力，駕馭並讓其融入日常。
     </p>
   </div>
 </section>
@@ -995,9 +996,9 @@ footer strong { color:#fff; }
 ══════════════════════════════════════ -->
 <footer>
   <!-- EDIT: footer 資訊 -->
-  <strong>Lab52</strong> &nbsp;·&nbsp; Shao Yu × Claude Sonnet 4.6 &nbsp;·&nbsp; 2026<br>
+  <strong>Lab52</strong> &nbsp;·&nbsp; Annice × Claude Sonnet 4.6 &nbsp;·&nbsp; 2026<br>
   KOL Influencer Tracker &nbsp;·&nbsp; 庫存管理系統<br>
-  <span style="opacity:.55;">$0 / 月 &nbsp;·&nbsp; Google Apps Script &nbsp;·&nbsp; Google Sheets</span>
+  <span style="opacity:.55;"> Google Apps Script &nbsp;·&nbsp; Google Sheets</span>
 </footer>
 
 
