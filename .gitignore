@@ -4,8 +4,13 @@ node_modules/
 *.db.lock/
 .claude/
 *.zip
-*.png
 *.jpg
+# story images — tracked
+!logo black-01.png
+!台灣倉.png
+!確認匯入防呆機制.png
+!專案記錄.png
+!Hover顯示.png
 *.xls
 *.xlsx
 
