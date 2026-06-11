@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vibe Coding — Lab52</title>
+<style>
+:root {
+  --bg:     #faf7f2;
+  --bg2:    #f0e9e1;
+  --bg3:    #e8ddd6;
+  --accent: #234f4b;
+  --teal:   #45bac4;
+  --warm:   #c47c45;
+  --red:    #bf4040;
+  --text:   #1e1e1e;
+  --muted:  #6b6558;
+  --border: #d9cfc4;
+}
+*  { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { font-family: -apple-system,'Helvetica Neue',Arial,'微軟正黑體',sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+img  { max-width: 100%; display: block; }
+
+/* ── containers ── */
+.w  { max-width: 760px; margin: 0 auto; padding: 0 28px; }
+.wf { max-width: 960px; margin: 0 auto; padding: 0 28px; }
+
+/* ── hero ── */
+.hero { background: var(--accent); padding: 48px 0 80px; position: relative; overflow: hidden; }
+.hero .w { padding-left: 8px; }
+.hero-logo { height:160px; margin-bottom:40px; filter:invert(1) brightness(2); opacity:.9; display:block; }
+.hero h1  { font-size:clamp(26px,5vw,42px); font-weight:800; color:#fff; line-height:1.25; max-width:580px; margin-bottom:22px; }
+.hero-sub { font-size:17px; color:#aad4d0; max-width:500px; line-height:1.9; }
+.hero-meta { margin-top:40px; font-size:13px; color:rgba(255,255,255,.35); letter-spacing:.04em; }
+.hero-meta strong { color:rgba(255,255,255,.6); font-weight:500; }
+
+/* ── chapter divider ── */
+.ch-divider { background:var(--bg3); padding:56px 0; text-align:center; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+.ch-divider .ch-num  { font-size:11px; font-weight:700; letter-spacing:.18em; text-transform:uppercase; color:var(--teal); margin-bottom:10px; }
+.ch-divider h2 { font-size:clamp(24px,4vw,36px); font-weight:800; color:var(--accent); margin-bottom:10px; }
+.ch-divider p  { font-size:16px; color:var(--muted); max-width:480px; margin:0 auto; }
+
+/* ── timeline within a chapter ── */
+.chapter { padding: 64px 0; }
+.tl { position:relative; padding-left:44px; }
+.tl::before { content:''; position:absolute; left:12px; top:8px; bottom:8px; width:2px; background:var(--border); }
+
+.step { position:relative; margin-bottom:60px; }
+.step:last-child { margin-bottom:0; }
+.step-dot {
+  position:absolute; left:-38px; top:7px;
+  width:12px; height:12px; border-radius:50%;
+  background:var(--bg); border:2.5px solid var(--teal);
+}
+.step-dot.on   { background:var(--teal); }
+.step-dot.done { background:var(--accent); border-color:var(--accent); }
+
+.step-date { font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--teal); margin-bottom:6px; }
+.step h2 { font-size:clamp(20px,3.5vw,26px); font-weight:800; color:var(--accent); line-height:1.25; margin-bottom:14px; }
+.step p  { font-size:15.5px; color:var(--text); margin-bottom:14px; max-width:660px; }
+.step p:last-child { margin-bottom:0; }
+.step p.sm { font-size:14px; color:var(--muted); }
+
+/* ── inline code ── */
+code { font-family:'Menlo','Consolas',monospace; font-size:.88em; background:var(--bg3); padding:2px 6px; border-radius:4px; color:var(--accent); }
+
+/* ── pull quote ── */
+.pq { border-left:4px solid var(--teal); background:var(--bg2); border-radius:0 10px 10px 0; padding:14px 22px; margin:20px 0; }
+.pq p { font-size:16px; font-style:italic; color:var(--muted); }
+
+/* ── callout ── */
+.callout { background:var(--accent); color:#fff; border-radius:12px; padding:22px 26px; margin:24px 0; }
+.callout p { font-size:15.5px; line-height:1.65; color:#fff; max-width:none; margin:0; }
+.callout em { color:#7dd8de; font-style:normal; font-weight:700; }
+
+/* ── feature card ── */
+.feat { background:var(--bg2); border:1px solid var(--border); border-radius:14px; overflow:hidden; margin:24px 0; }
+.feat-screen { background:#e0dbd3; }
+.feat-bar { display:flex; align-items:center; gap:6px; padding:8px 12px; background:#d4cfc7; }
+.feat-dot { width:9px; height:9px; border-radius:50%; }
+.feat-url { font-size:11px; color:#999; margin-left:6px; }
+.feat-screen img { width:100%; display:block; border-radius:0; height:420px; object-fit:cover; object-position:top left; }
+.feat-body  { padding:22px 26px; }
+.feat-tag   { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; background:var(--bg3); color:var(--muted); padding:3px 10px; border-radius:99px; margin-bottom:10px; }
+.feat-body h3 { font-size:18px; font-weight:700; color:var(--accent); margin-bottom:8px; }
+.feat-body p  { font-size:14.5px; color:var(--text); max-width:620px; margin:0; }
+
+/* ── bug list ── */
+.bugs { display:flex; flex-direction:column; gap:8px; margin:18px 0; }
+.bug  { background:var(--bg2); border-left:3px solid var(--red); border-radius:0 8px 8px 0; padding:11px 16px; }
+.bug-t { font-size:13.5px; font-weight:700; color:var(--red); margin-bottom:2px; }
+.bug-d { font-size:13px; color:var(--muted); }
+.bug-f { font-size:13px; color:var(--accent); margin-top:4px; }
+.bug-f::before { content:'→  '; }
+
+/* ── table ── */
+.tbl { width:100%; border-collapse:collapse; font-size:14px; margin:16px 0; }
+.tbl th { background:var(--bg3); padding:9px 14px; text-align:left; font-weight:700; color:var(--accent); }
+.tbl td { padding:8px 14px; border-bottom:1px solid var(--border); vertical-align:top; color:var(--text); }
+.tbl tr:last-child td { border-bottom:none; }
+
+/* ── stat row ── */
+.stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:24px 0; }
+@media(max-width:560px){ .stats { grid-template-columns:repeat(2,1fr); } }
+.stat  { background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:16px 12px; text-align:center; }
+.stat-n { font-size:26px; font-weight:900; color:var(--accent); }
+.stat-l { font-size:12px; color:var(--muted); margin-top:4px; line-height:1.4; }
+
+/* ── pills ── */
+.pills { display:flex; gap:8px; flex-wrap:wrap; margin:14px 0; }
+.pill  { background:var(--bg3); border:1px solid var(--border); border-radius:99px; padding:5px 13px; font-size:13px; color:var(--text); }
+
+/* ── principles ── */
+.principles { display:flex; flex-direction:column; gap:14px; margin:24px 0; }
+.principle  { display:flex; gap:16px; align-items:flex-start; background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:18px 20px; }
+.p-num  { font-size:26px; font-weight:900; color:var(--border); line-height:1; min-width:28px; margin-top:-1px; }
+.p-body h3 { font-size:15px; font-weight:700; color:var(--accent); margin-bottom:4px; }
+.p-body p  { font-size:14px; color:var(--muted); max-width:none; margin:0; }
+
+/* ── division ── */
+.div2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin:22px 0; }
+@media(max-width:560px){ .div2 { grid-template-columns:1fr; } }
+.div-col { background:var(--bg2); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+.div-col h3 { padding:11px 16px; font-size:14px; font-weight:700; background:var(--bg3); border-bottom:1px solid var(--border); color:var(--accent); }
+.div-col li { list-style:none; padding:8px 16px; border-bottom:1px solid var(--border); font-size:13.5px; color:var(--text); }
+.div-col li:last-child { border-bottom:none; }
+.div-col li::before { content:'·  '; color:var(--teal); font-weight:700; }
+
+/* ── closing ── */
+.closing { background:var(--bg2); padding:70px 0; text-align:center; }
+.closing h2 { font-size:clamp(22px,4vw,32px); font-weight:800; color:var(--accent); line-height:1.3; margin-bottom:18px; }
+.closing p  { font-size:17px; color:var(--muted); max-width:520px; margin:0 auto; line-height:1.85; }
+footer { background:var(--accent); color:#7dd8de; text-align:center; padding:44px 28px; font-size:13px; line-height:2; }
+footer strong { color:#fff; }
+
+/* ── mockups ── */
+.mockup { background:var(--bg); font-size:13px; }
+
+/* todo */
+.todo-hd { background:var(--accent); color:#fff; padding:10px 16px; font-weight:700; font-size:13px; }
+.todo-row { display:flex; align-items:center; gap:10px; padding:10px 16px; border-bottom:1px solid var(--border); }
+.todo-row:last-child { border-bottom:none; }
+.todo-ico { font-size:16px; min-width:22px; }
+.todo-txt { flex:1; }
+.todo-name { font-weight:600; font-size:13px; }
+.todo-sub  { font-size:11.5px; color:var(--muted); margin-top:1px; }
+.badge { font-size:11px; font-weight:700; padding:2px 9px; border-radius:99px; white-space:nowrap; }
+.b-red  { background:#fde8e8; color:var(--red); }
+.b-warn { background:#fef3e2; color:#a0620a; }
+.b-ok   { background:#e2f5f0; color:#1d6b52; }
+
+/* sidebar */
+.sb-mock { display:grid; grid-template-columns:1fr 340px; }
+@media(max-width:600px){ .sb-mock { grid-template-columns:1fr; } }
+.sb-list { padding:8px 0; }
+.sb-row  { display:flex; align-items:center; gap:10px; padding:9px 16px; border-bottom:1px solid var(--border); cursor:pointer; }
+.sb-row.on { background:var(--bg2); }
+.sb-dot  { width:8px; height:8px; border-radius:50%; background:var(--teal); flex-shrink:0; }
+.sb-name { font-weight:600; font-size:13px; }
+.sb-st   { font-size:11px; color:var(--muted); }
+.sb-panel { background:var(--bg2); border-left:1px solid var(--border); padding:16px; }
+.sb-kol  { font-size:15px; font-weight:800; color:var(--accent); }
+.sb-sub  { font-size:12px; color:var(--muted); margin-top:2px; }
+.sb-hr   { height:1px; background:var(--border); margin:12px 0; }
+.tl-dots { display:flex; align-items:center; gap:0; margin:10px 0; }
+.tld     { display:flex; flex-direction:column; align-items:center; flex:1; font-size:10px; color:var(--muted); gap:4px; }
+.tld-c   { width:26px; height:26px; border-radius:50%; border:2px solid var(--border); background:var(--bg); display:flex; align-items:center; justify-content:center; font-size:10px; }
+.tld-c.done { background:var(--accent); border-color:var(--accent); color:#fff; }
+.tld-c.now  { background:var(--teal); border-color:var(--teal); color:#fff; }
+.tld-line   { flex:1; height:2px; background:var(--border); margin-bottom:14px; }
+.tld-line.done { background:var(--accent); }
+.sb-link { display:inline-flex; align-items:center; gap:6px; background:var(--accent); color:#fff; padding:6px 13px; border-radius:7px; font-size:12px; font-weight:600; margin-top:8px; }
+
+/* calendar */
+.cal { padding:16px; }
+.cal-hd { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.cal-m  { font-weight:800; font-size:14px; color:var(--accent); }
+.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+.cal-dh { text-align:center; font-size:10px; font-weight:700; color:var(--muted); padding:4px 0; }
+.cal-d  { text-align:center; padding:5px 2px; font-size:12px; border-radius:5px; min-height:34px; display:flex; flex-direction:column; align-items:center; gap:2px; }
+.cal-d.today { background:var(--accent); color:#fff; font-weight:700; }
+.cal-d.hol   { background:#fff8ed; }
+.hol-tag { font-size:9px; background:#fde8c4; color:#a0620a; border-radius:3px; padding:1px 4px; line-height:1.4; }
+.cal-d.has::after { content:'●'; font-size:7px; color:var(--teal); }
+
+/* status cycle */
+.sc { padding:18px 22px; }
+.sc-label { font-size:12px; color:var(--muted); margin-bottom:12px; }
+.sc-dots  { display:flex; align-items:center; gap:2px; flex-wrap:wrap; }
+.sc-item  { display:flex; flex-direction:column; align-items:center; gap:5px; }
+.sc-c { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:14px; }
+.sc-l { font-size:10px; color:var(--muted); }
+.sc-arr { color:var(--border); font-size:15px; margin:0 4px 14px; }
+.s1 { background:#e8e8e8; }
+.s2 { background:#dbeafe; }
+.s3 { background:#fef3c7; }
+.s4 { background:#d1fae5; }
+.s5 { background:#a7f3d0; }
+
+/* ── before / after ── */
+.ba { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--border); border-radius:10px; overflow:hidden; margin:20px 0; }
+.ba-col { padding:16px 20px; }
+.ba-before { background:#fff8f8; }
+.ba-after  { background:#f0faf8; }
+.ba-label  { font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; margin-bottom:10px; }
+.ba-before .ba-label { color:var(--red); }
+.ba-after  .ba-label { color:#1d6b52; }
+.ba-item   { display:flex; gap:8px; margin-bottom:6px; font-size:13.5px; line-height:1.5; color:var(--text); }
+.ba-item:last-child { margin-bottom:0; }
+.ba-before .ba-item::before { content:'✕'; color:var(--red); font-size:11px; margin-top:3px; flex-shrink:0; }
+.ba-after  .ba-item::before { content:'✓'; color:#1d6b52; font-size:11px; margin-top:3px; flex-shrink:0; }
+
+/* ── cta ── */
+.cta-btn  { display:inline-flex; align-items:center; gap:8px; background:var(--accent); color:#fff; padding:12px 24px; border-radius:9px; font-size:14px; font-weight:700; text-decoration:none; transition:opacity .15s; }
+.cta-btn:hover { opacity:.82; }
+
+/* CORS error mockup */
+.err-mock { background:#1e1e1e; padding:14px 16px; font-family:'Menlo','Consolas',monospace; font-size:12px; line-height:1.8; }
+.err-red  { color:#ff6b6b; }
+.err-warn { color:#ffd93d; }
+.err-grey { color:#888; }
+.err-white { color:#ddd; }
+</style>
+</head>
+<body>
+
+
+<!-- ══════════════════════════════════════
+  HERO
+══════════════════════════════════════ -->
+<section class="hero">
+  <div class="w">
+    <!-- EDIT: logo -->
+    <img src="logo black-01.png" class="hero-logo" alt="Lab52">
+
+    <!-- EDIT: 主標題 -->
+    <h1>不懂如何寫程式的人<br>如何在18天做出兩套實用工具</h1>
+
+    <!-- EDIT: 副標題 -->
+    <p class="hero-sub">工作上需要整合管理的資訊越來越多，我思考了要如何讓團隊工作流程更順利，也想了解AI的世界有什麼是我能接軌的。於是我開啟Youtube的教學影片下載終端機後，開始寫程式之旅。<br>我懂業務、懂使用者需求，所以我嘗試提出需求，讓AI 出工程。<br>以下是精簡的過程紀錄。</p>
+
+    <p class="hero-meta"><strong>Vibe Coding</strong> &nbsp;·&nbsp; Google Apps Script &nbsp;·&nbsp; $0 / 月</p>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════
+  CHAPTER 1 DIVIDER
+══════════════════════════════════════ -->
+<div class="ch-divider">
+  <div class="w">
+    <!-- EDIT: 章節標籤 -->
+    <div class="ch-num">Chapter 01 &nbsp;·&nbsp; May 19 – 26, 2026</div>
+    <h2>KOL Influencer Tracker</h2>
+    <p>如何優化團隊作業流程呢？發現需求並解決問題。</p>
+    <a href="https://script.google.com/a/macros/toothfilm.com/s/AKfycbw4JDzQohChOT2944hNqzaJXVzvTHRGhbWmIjgoM-Phx-5lvaaGVjS1Mm7TtgtbUbJvBw/exec" target="_blank" class="cta-btn" style="margin-top:22px;">進入工具 →</a>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════
+  CHAPTER 1 CONTENT
+══════════════════════════════════════ -->
+<section class="chapter">
+  <div class="w">
+    <div class="tl">
+
+
+      <!-- Step: 起點 -->
+      <div class="step">
+        <div class="step-dot on"></div>
+        <div class="step-date">Day 1 — 起點</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>現有記錄工具，太雜亂了</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>因為每天要追蹤數十位 KOC 的合作進度，流程大概有：洽談、寄產品、催腳本、等初稿、審核、確認上線、付尾款。每個 KOC 都在不同進度，截止日一不小心就漏了。所以組員嘗試透過Notion去改變工作流程，但看完後我發現痛點還是無法根本解決...</p>
+
+        <table class="tbl">
+          <tr><th>工具</th><th>問題在哪</th></tr>
+          <!-- EDIT: 表格 -->
+          <tr><td>Google Sheets</td><td>欄位多、跨分頁找資料、日期要手動算、完全沒有提醒</td></tr>
+          <tr><td>Notion</td><td>介面好看，但進階功能要付費、無法串 Sheets</td></tr>
+          <tr><td>市面 KOL 平台</td><td>定價高、功能過剩、無法客製化我們的業務邏輯</td></tr>
+        </table>
+
+        <div class="ba">
+          <div class="ba-col ba-before">
+            <div class="ba-label">以前</div>
+            <div class="ba-item">Sheets、Notion、記憶，跳來跳去</div>
+            <div class="ba-item">截止日靠自己記，漏了才發現</div>
+            <div class="ba-item">組員不確定要看哪裡</div>
+          </div>
+          <div class="ba-col ba-after">
+            <div class="ba-label">現在</div>
+            <div class="ba-item">開 App，今日待辦自動出現</div>
+            <div class="ba-item">逾期自動標紅，不會漏</div>
+            <div class="ba-item">同一個連結，所有人看同一份資料</div>
+          </div>
+        </div>
+
+        <div class="pq">
+          <!-- EDIT: 引用 -->
+          <p>「那既然我們都知道痛點與需求了，那就讓AI 負責工程吧我想。」</p>
+        </div>
+      </div>
+
+
+      <!-- Step: .bat 啟動檔 -->
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-date">Day 1 — 第一個使用者決策</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>雙擊開啟，什麼都不用設</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>開發第一天就意識到：用 <code>file://</code> 直接開 HTML，瀏覽器會封鎖所有外部請求。解法是架本機伺服器，但要叫組員每次開 terminal 輸指令太不現實。</p>
+        <p>所以我的第一個決定是：<strong>不讓她碰任何技術細節。</strong></p>
+        <p>做了一個批次檔 <code>啟動追蹤表.bat</code>——雙擊它，Node.js 伺服器自動開、瀏覽器自動跳到正確頁面。<code>%~dp0</code> 讓路徑永遠相對於檔案位置，資料夾改名也不會壞掉。這是整個工具的第一個使用者體驗決策：<strong>使用者不需要懂技術，才能用這個工具。</strong></p>
+      </div>
+
+
+      <!-- Step: 自動待辦引擎 -->
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-date">Day 2–3 — 核心功能</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>每天開啟，待辦自動出現</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>最核心的功能：每天開啟 App，系統自動比對所有 KOL 資料，依照業務規則生成當天待辦。哪些規則、幾天前觸發自己決定，因為 AI 不懂我們的業務流程。</p>
+
+        <div class="feat">
+          <div class="feat-screen">
+            <div class="feat-bar">
+              <div class="feat-dot" style="background:#ff5f57"></div>
+              <div class="feat-dot" style="background:#febc2e"></div>
+              <div class="feat-dot" style="background:#28c840"></div>
+              <span class="feat-url">KOL Tracker — Today</span>
+            </div>
+            <div class="mockup">
+              <div class="todo-hd">📋 Today — Progress Check <span style="font-weight:400;font-size:11px;opacity:.65">· Jun 11 · 5 items</span></div>
+              <!-- EDIT: 待辦項目 -->
+              <div class="todo-row">
+                <div class="todo-ico">💰</div>
+                <div class="todo-txt"><div class="todo-name">今日需付首款</div><div class="todo-sub">@beautyqueen_lisa &nbsp;·&nbsp; USD 500</div></div>
+                <span class="badge b-red">今天</span>
+              </div>
+              <div class="todo-row">
+                <div class="todo-ico">📝</div>
+                <div class="todo-txt"><div class="todo-name">3天內催腳本</div><div class="todo-sub">@fitnessguru_james &nbsp;·&nbsp; 截止 Jun 14</div></div>
+                <span class="badge b-warn">2 天後</span>
+              </div>
+              <div class="todo-row">
+                <div class="todo-ico">🎬</div>
+                <div class="todo-txt"><div class="todo-name">3天內催初稿</div><div class="todo-sub">@cookingwithsarah &nbsp;·&nbsp; 截止 Jun 13</div></div>
+                <span class="badge b-warn">今天</span>
+              </div>
+              <div class="todo-row">
+                <div class="todo-ico">📢</div>
+                <div class="todo-txt"><div class="todo-name">今日上線確認</div><div class="todo-sub">@fashionwithamy &nbsp;·&nbsp; live_date 今天</div></div>
+                <span class="badge b-red">確認</span>
+              </div>
+              <div class="todo-row">
+                <div class="todo-ico">💵</div>
+                <div class="todo-txt"><div class="todo-name">今日需付尾款</div><div class="todo-sub">@techreview_mike &nbsp;·&nbsp; 狀態 Published</div></div>
+                <span class="badge b-ok">準備付款</span>
+              </div>
+            </div>
+          </div>
+          <div class="feat-body">
+            <span class="feat-tag">Design Decision</span>
+            <!-- EDIT: 功能說明 -->
+            <h3>逾期 14 天自動隱藏</h3>
+            <p>超過 14 天的舊案件自動隱藏、只顯示計數。讓使用者聚焦在今天真正要做的事，不被舊案件淹沒。</p>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- Step: Sidebar -->
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-date">Day 3–4 — Sidebar</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>從看到提醒，到發出聯絡，不離開頁面</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>執行的過程，我不斷以使用者角度出發，所有操作上的細節都需要注意，必須不斷反覆的思考如何讓使用更便利，這個工具才有意義</p>
+        <p>例如：點任何一條待辦，右側滑出面板，顯示 KOL 的聯絡方式、Timeline 進度、備注。</p>
+        <p>還有個有趣的設計：<strong>Sidebar 唯讀。</strong> 「快速拿到聯絡方式」跟「編輯資料」是兩件不同的事，不應該混在一起。要改資料，去 Paid Collabs 分頁。</p>
+        
+        <div class="feat">
+          <div class="feat-screen">
+            <div class="feat-bar">
+              <div class="feat-dot" style="background:#ff5f57"></div>
+              <div class="feat-dot" style="background:#febc2e"></div>
+              <div class="feat-dot" style="background:#28c840"></div>
+              <span class="feat-url">KOL Tracker — Paid Collabs</span>
+            </div>
+            <div class="mockup">
+              <div class="sb-mock">
+                <div class="sb-list">
+                  <div class="sb-row on"><div class="sb-dot"></div><div><div class="sb-name">@beautyqueen_lisa</div><div class="sb-st">Shooting · 截止 Jun 14</div></div></div>
+                  <div class="sb-row"><div class="sb-dot" style="background:var(--warm)"></div><div><div class="sb-name">@fitnessguru_james</div><div class="sb-st">Product Sent · 截止 Jun 14</div></div></div>
+                  <div class="sb-row"><div class="sb-dot" style="background:#a8d5a2"></div><div><div class="sb-name">@techreview_mike</div><div class="sb-st">Published</div></div></div>
+                </div>
+                <div class="sb-panel">
+                  <div class="sb-kol">@beautyqueen_lisa</div>
+                  <div class="sb-sub">Paid Collab &nbsp;·&nbsp; USD 1,200</div>
+                  <div class="sb-hr"></div>
+                  <div style="font-size:10px;color:var(--muted);margin-bottom:8px;letter-spacing:.08em;">TIMELINE</div>
+                  <div class="tl-dots">
+                    <div class="tld"><div class="tld-c done">✓</div><div>首款</div></div>
+                    <div class="tld-line done"></div>
+                    <div class="tld"><div class="tld-c done">✓</div><div>寄貨</div></div>
+                    <div class="tld-line done"></div>
+                    <div class="tld"><div class="tld-c now">●</div><div>腳本</div></div>
+                    <div class="tld-line"></div>
+                    <div class="tld"><div class="tld-c">○</div><div>初稿</div></div>
+                    <div class="tld-line"></div>
+                    <div class="tld"><div class="tld-c">○</div><div>尾款</div></div>
+                  </div>
+                  <div class="sb-hr"></div>
+                  <div style="font-size:12px;color:var(--muted);">📧 lisa@beautyco.com</div>
+                  <span class="sb-link">💬 IG DM → ig.me/m/beautyqueen_lisa</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="feat-body">
+            <span class="feat-tag">Design Decision</span>
+            <!-- EDIT: 功能說明 -->
+            <h3>IG DM 一鍵跳轉</h3>
+            <p>IG DM 連結格式是 <code>ig.me/m/username</code>。系統從 handle 自動組成這個連結，點一下就開 DM。這也是我在設計的小巧思，因為和 KOL 溝通最常用的就是 IG。</p>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- Step: Calendar + 美國假日 -->
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-date">Day 4–5 — Posts Calendar</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>既然聯絡表都完成了，那就把排程也加入吧</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>在初期只是想要更方便管理KOC，但接著發現那何不把社群的會碰到的資訊都搬上來呢？每個月都有貼文排程，可以新增客製化的行事曆讓使用者更好追蹤記錄</p>
+        <p>Posts 分頁有月曆視圖，我也注意到：<strong>把美國的假日和重要節慶標出來。</strong> 因為美國假日影響受眾活躍度，排程的時候要考慮。</p>
+        <p>只需要下需求，AI 就實作了浮動假日的算法，感恩節（11月第四個週四）、母親節（5月第二個週日）這種，是用算的，不是硬寫日期。我沒要求它怎麼算，交給它自己判斷了。</p>
+
+        <div class="feat">
+          <div class="feat-screen">
+            <div class="feat-bar">
+              <div class="feat-dot" style="background:#ff5f57"></div>
+              <div class="feat-dot" style="background:#febc2e"></div>
+              <div class="feat-dot" style="background:#28c840"></div>
+              <span class="feat-url">KOL Tracker — Posts Calendar</span>
+            </div>
+            <div class="mockup">
+              <div class="cal">
+                <div class="cal-hd">
+                  <div class="cal-m">May 2026</div>
+                  <div style="display:flex;gap:5px;">
+                    <button style="background:var(--bg3);border:none;border-radius:5px;padding:3px 9px;cursor:pointer;font-size:12px;">‹</button>
+                    <button style="background:var(--bg3);border:none;border-radius:5px;padding:3px 9px;cursor:pointer;font-size:12px;">›</button>
+                  </div>
+                </div>
+                <div class="cal-grid">
+                  <div class="cal-dh">Mo</div><div class="cal-dh">Tu</div><div class="cal-dh">We</div><div class="cal-dh">Th</div><div class="cal-dh">Fr</div><div class="cal-dh">Sa</div><div class="cal-dh">Su</div>
+                  <div class="cal-d"></div><div class="cal-d"></div><div class="cal-d"></div><div class="cal-d">1</div><div class="cal-d">2</div><div class="cal-d has">3</div><div class="cal-d">4</div>
+                  <div class="cal-d has">5</div><div class="cal-d">6</div><div class="cal-d">7</div><div class="cal-d">8</div><div class="cal-d has">9</div><div class="cal-d">10</div>
+                  <div class="cal-d hol">11<div class="hol-tag">Mother's Day</div></div>
+                  <div class="cal-d">12</div><div class="cal-d">13</div><div class="cal-d">14</div><div class="cal-d has">15</div><div class="cal-d">16</div><div class="cal-d today">17</div><div class="cal-d">18</div>
+                  <div class="cal-d">19</div><div class="cal-d">20</div><div class="cal-d has">21</div><div class="cal-d">22</div><div class="cal-d">23</div><div class="cal-d">24</div><div class="cal-d">25</div>
+                  <div class="cal-d hol">26<div class="hol-tag">Memorial Day</div></div>
+                  <div class="cal-d">27</div><div class="cal-d">28</div><div class="cal-d has">29</div><div class="cal-d">30</div><div class="cal-d">31</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="feat-body">
+            <span class="feat-tag">Design Decision</span>
+            <!-- EDIT: 功能說明 -->
+            <h3>狀態點一下循環切換</h3>
+            <p>每個貼文格有一個色點代表狀態。點一下，狀態自動循環切換並即時回寫 Sheets。不用打開 Modal，不用找下拉選單。因為「我只是想標記這篇排程了，不想做其他事。」</p>
+          </div>
+        </div>
+
+        <div class="feat" style="margin-top:0">
+          <div class="feat-screen">
+            <div class="feat-bar">
+              <div class="feat-dot" style="background:#ff5f57"></div>
+              <div class="feat-dot" style="background:#febc2e"></div>
+              <div class="feat-dot" style="background:#28c840"></div>
+              <span class="feat-url">點一下，狀態循環切換 → 即時同步 Sheets</span>
+            </div>
+            <div class="mockup">
+              <div class="sc">
+                <div class="sc-label">貼文狀態點擊循環</div>
+                <div class="sc-dots">
+                  <div class="sc-item"><div class="sc-c s1">💡</div><div class="sc-l">Idea</div></div>
+                  <div class="sc-arr">→</div>
+                  <div class="sc-item"><div class="sc-c s2">✏️</div><div class="sc-l">Drafting</div></div>
+                  <div class="sc-arr">→</div>
+                  <div class="sc-item"><div class="sc-c s3">📅</div><div class="sc-l">Scheduled</div></div>
+                  <div class="sc-arr">→</div>
+                  <div class="sc-item"><div class="sc-c s4">✅</div><div class="sc-l">Ready</div></div>
+                  <div class="sc-arr">→</div>
+                  <div class="sc-item"><div class="sc-c s5">🌟</div><div class="sc-l">Published</div></div>
+                  <div class="sc-arr" style="color:var(--border)">↩</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- Step: 其他細節 -->
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-date">Day 5–7 — 細節堆疊</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>13 個設計決策，每一個來自真實情境</h2>
+
+        <div class="pills">
+          <!-- EDIT: 功能標籤 -->
+          <span class="pill">自製日曆選擇器</span>
+          <span class="pill">範本變數橘色高亮</span>
+          <span class="pill">Quick Lookup 跨頁查詢</span>
+          <span class="pill">Outreach → Paid 一鍵轉換</span>
+          <span class="pill">今日已處理（本機快取）</span>
+          <span class="pill">Brand Quick Reference</span>
+          <span class="pill">Toast 取代原生 alert</span>
+          <span class="pill">Export CSV</span>
+        </div>
+
+        <!-- EDIT: 小故事 -->
+        <p><strong>「範本變數橘色高亮」</strong> — DM 外發範本裡的 <code>[Name]</code>、<code>[product]</code> 在預覽時自動橘色顯示，提醒記得替換。不然複製貼上發出去才發現沒改到 <code>[Name]</code>，超尷尬。</p>
+        <p><strong>「今日已處理不寫回 Sheets」</strong> — 勾選「今天已催腳本了」只存在瀏覽器本機。因為「我今天發了訊息」不是 KOL 狀態的改變，隔天 KOL 沒交稿，提醒還是要出現。每個人有自己的本機記錄，不影響其他人視圖。</p>
+        <p><strong>「自製日曆選擇器」</strong> — 原生的 <code>input[type=date]</code> 跨瀏覽器長得不一樣而且很醜。我說太醜了，AI 重做了一個跟整體設計一致的版本。</p>
+      </div>
+
+
+      <!-- Step: CORS -->
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-date">Day 5 — 技術障礙</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>然後撞上了 CORS</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>想讓 Web App 直接從 Google Sheets 拉資料，結果瀏覽器一直跳 CORS 錯誤。這是使用者看不到的問題，但不解決整個同步就是壞的。</p>
+
+        <div class="feat">
+          <div class="feat-screen">
+            <div class="feat-bar">
+              <div class="feat-dot" style="background:#ff5f57"></div>
+              <div class="feat-dot" style="background:#febc2e"></div>
+              <div class="feat-dot" style="background:#28c840"></div>
+              <span class="feat-url">Browser Console — CORS errors</span>
+            </div>
+            <div class="mockup">
+              <div class="err-mock">
+                <div class="err-red">❌ Access to fetch at 'https://docs.google.com/spreadsheets/...'</div>
+                <div class="err-red">&nbsp;&nbsp;&nbsp;from origin 'null' has been blocked by CORS policy</div>
+                <div class="err-grey">&nbsp;&nbsp;&nbsp;No 'Access-Control-Allow-Origin' header is present</div>
+                <div class="err-warn">⚠ Cross-Origin Request Blocked</div>
+                <div class="err-grey">&nbsp;&nbsp;&nbsp;Reason: CORS header 'Access-Control-Allow-Origin' missing</div>
+              </div>
+            </div>
+          </div>
+          <div class="feat-body">
+            <span class="feat-tag">Problem → Solution</span>
+            <!-- EDIT: 解法說明 -->
+            <h3>解法：三道保險</h3>
+            <p>AI 提出用 <strong>JSONP</strong> 繞過限制——前端動態插入 <code>&lt;script src="GAS_URL?callback=fn"&gt;</code>，GAS 後端返回 <code>fn({...})</code>，瀏覽器自動執行，資料就進來了。三道保險：GAS 直連（部署版）、JSONP URL（本機開發版）、CSV 匯入（備用）。同步後快取到 localStorage，下次開啟不需要等。</p>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- Step: 上線 -->
+      <div class="step">
+        <div class="step-dot done"></div>
+        <div class="step-date">May 26 — 上線</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>8 天。組員開始用了。</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>~4,500 行程式碼，8 個寫回函數，13 個設計決策。組員的待辦清單第一次可以自動生成了。</p>
+
+        <div class="callout">
+          <!-- EDIT: callout -->
+          <p>這套工具解決的核心問題：<em>讓組員把時間花在「跟 KOL 溝通」，而不是「找資料」和「記有沒有催過」。</em></p>
+        </div>
+
+        <div class="stats">
+          <!-- EDIT: 數字 -->
+          <div class="stat"><div class="stat-n">8天</div><div class="stat-l">開發週期</div></div>
+          <div class="stat"><div class="stat-n">9</div><div class="stat-l">Git commits</div></div>
+          <div class="stat"><div class="stat-n">13</div><div class="stat-l">UI 設計決策</div></div>
+          <div class="stat"><div class="stat-n">$0</div><div class="stat-l">月費</div></div>
+        </div>
+      </div>
+
+
+    </div><!-- /tl -->
+  </div><!-- /w -->
+</section>
+
+
+<!-- ══════════════════════════════════════
+  CHAPTER 2 DIVIDER
+══════════════════════════════════════ -->
+<div class="ch-divider">
+  <div class="w">
+    <!-- EDIT: 章節標籤 -->
+    <div class="ch-num">Chapter 02 &nbsp;·&nbsp; June 1 – 11, 2026</div>
+    <h2>Lab52 庫存系統</h2>
+    <p>海外倉 + 台灣倉 + FBA，資料散落各處。我需要一個統一的地方。</p>
+    <a href="https://script.google.com/macros/s/AKfycbwwYnGApe7GKk6sPzqvspd3r_uKoJtF9TE1ddVIukR2lCC0FGbbVs-vp0HyiuvI-jwXQg/exec" target="_blank" class="cta-btn" style="margin-top:22px;">進入工具 →</a>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════
+  CHAPTER 2 CONTENT
+══════════════════════════════════════ -->
+<section class="chapter">
+  <div class="w">
+    <div class="tl">
+
+
+      <!-- Step: 問題 -->
+      <div class="step">
+        <div class="step-dot on"></div>
+        <div class="step-date">Day 1 — 問題定義</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>所有資料都在，但沒有一個地方可以統一看</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>Lab52 在美國用兩個倉道：AMZLG&S 海外倉負責大部分庫存，Amazon FBA 負責快速出貨。台灣這邊也有自己的倉。</p>
+        <p>每個倉的資料格式不一樣——海外倉透過google sheet記錄、FBA 的資料在 Seller Central、台灣倉有自己的系統。我想要的東西很清楚：<strong>一個頁面，看到所有倉的狀況，方便我抓庫存並與組員共享。</strong></p>
+
+        <div class="ba">
+          <div class="ba-col ba-before">
+            <div class="ba-label">以前</div>
+            <div class="ba-item">Seller Central 看 FBA</div>
+            <div class="ba-item">另開 Sheets 看海外倉</div>
+            <div class="ba-item">台灣倉是另一套系統</div>
+            <div class="ba-item">三個地方，手動比對</div>
+          </div>
+          <div class="ba-col ba-after">
+            <div class="ba-label">現在</div>
+            <div class="ba-item">一個連結，三個倉同時看</div>
+            <div class="ba-item">庫存水位每小時自動同步</div>
+            <div class="ba-item">手機、電腦都能開，不需要本機</div>
+            <div class="ba-item">還有幾天的貨，自動算</div>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- Step: Phase 1 Node.js -->
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-date">Day 1–3 — 第一版</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>其實也不知道如何呈現，但先跑起來，踩坑再解決吧。</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>第一版選了 Node.js + Express + SQLite，最直覺的選法，先把邏輯做出來再說。第一個坑馬上出現：Windows 上沒有 Visual C++ Build Tools，<code>better-sqlite3</code> 無法安裝。AI 改用 WebAssembly 版的 <code>node-sqlite3-wasm</code>，不需要編譯器，但帶出了一串隱性限制：</p>
+
+        <div class="bugs">
+          <!-- EDIT: bug 清單 -->
+          <div class="bug"><div class="bug-t">路徑不可含空格</div><div class="bug-d">DB 在 AI TEST/Files/... → 直接讀不到</div><div class="bug-f">改存至 C:\Users\User\Lab52Inventory\</div></div>
+          <div class="bug"><div class="bug-t">4 個以上參數寫法不同</div><div class="bug-d">.run(a,b,c,d) 靜默失敗，完全沒報錯</div><div class="bug-f">改成 .run([a,b,c,d]) 陣列形式</div></div>
+          <div class="bug"><div class="bug-t">不支援 WAL pragma</div><div class="bug-d">PRAGMA WAL → database locked</div><div class="bug-f">直接移除，不使用 WAL</div></div>
+          <div class="bug"><div class="bug-t">不支援 db.transaction()</div><div class="bug-d">呼叫就 crash</div><div class="bug-f">手動用 BEGIN / COMMIT / ROLLBACK</div></div>
+          <div class="bug"><div class="bug-t">lock 是目錄不是檔案</div><div class="bug-d">crash 後殘留 inventory.db.lock/，再次啟動失敗</div><div class="bug-f">啟動時 rmSync 自動清除</div></div>
+          <div class="bug"><div class="bug-t">多語句 exec 不可用</div><div class="bug-d">CREATE TABLE A; CREATE TABLE B; 只跑第一句</div><div class="bug-f">拆成個別 .exec() 呼叫</div></div>
+        </div>
+
+        <div class="pq">
+          <!-- EDIT: 引用 -->
+          <p>「先跑起來，再修問題。真實踩到的問題比預想的更具體，也更有解。」</p>
+        </div>
+      </div>
+
+
+      <!-- Step: 架構轉向 -->
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-date">Day 3–4 — 架構決策</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>第一版跑起來了。然後我決定砍掉重練。</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>Node.js 版功能做出來了，但有個根本問題沒解決：<strong>需要本機伺服器常駐。</strong> 每次查庫存都要先開電腦跑 terminal，公司其他人也看不到資料。</p>
+        <p>同時，倉庫寄來的報表本來就是 Google Sheets 格式，FBA 也可以直接匯出到 Sheets。那為什麼不乾脆用 Google Apps Script 當後端？有連結就能開，不需要裝任何東西，月費 $0。</p>
+
+        <div class="callout">
+          <!-- EDIT: callout -->
+          <p>第一版的兩三天不是浪費。<em>那兩三天是用來搞清楚「我真正需要什麼」。帶著這些業務邏輯重建，比第一次從零開始快得多，因為你已經知道答案了。</em></p>
+        </div>
+      </div>
+
+
+      <!-- Step: 台灣倉 + 匯入 -->
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-date">Day 4–10 — 功能開發</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>台灣倉和匯入防呆</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>GAS 版新增了台灣倉獨立分頁，跟海外倉完全分開、有自己的出入庫紀錄和流水帳餘量。同時做了 XLS 匯入——倉庫寄來的 Excel 直接拖進去就能匯入。</p>
+        <p>匯入有一個防呆設計：<strong>先顯示預覽，確認之後才真的寫進去。</strong> 因為一旦匯錯了，改起來很麻煩。</p>
+
+        <div class="feat">
+          <div class="feat-screen">
+            <div class="feat-bar">
+              <div class="feat-dot" style="background:#ff5f57"></div>
+              <div class="feat-dot" style="background:#febc2e"></div>
+              <div class="feat-dot" style="background:#28c840"></div>
+              <span class="feat-url">Lab52 庫存系統 — 台灣倉 XLS 匯入預覽</span>
+            </div>
+            <!-- EDIT: 截圖路徑 -->
+            <img src="確認匯入防呆機制.png" alt="匯入防呆機制">
+          </div>
+          <div class="feat-body">
+            <span class="feat-tag">實際截圖</span>
+            <!-- EDIT: 說明 -->
+            <h3>匯入前先看，確認才寫入</h3>
+            <p>XLS 上傳後先解析成預覽表格，顯示每一筆 EAN、產品名稱、數量、效期。確認無誤按「確認匯入」才真的寫進 Sheets。找不到每箱 pcs 的也會直接標注出來。</p>
+          </div>
+        </div>
+
+        <div class="feat" style="margin-top:0">
+          <div class="feat-screen">
+            <div class="feat-bar">
+              <div class="feat-dot" style="background:#ff5f57"></div>
+              <div class="feat-dot" style="background:#febc2e"></div>
+              <div class="feat-dot" style="background:#28c840"></div>
+              <span class="feat-url">Lab52 庫存系統 — 台灣倉庫存</span>
+            </div>
+            <!-- EDIT: 截圖路徑 -->
+            <img src="台灣倉.png" alt="台灣倉庫存">
+          </div>
+          <div class="feat-body">
+            <span class="feat-tag">實際截圖</span>
+            <!-- EDIT: 說明 -->
+            <h3>台灣倉庫存一覽</h3>
+            <p>每個產品顯示目前箱數和狀態（正常 / 無庫存）。狀態用公式自動算，不需要手動更新。搜尋支援 EAN 或產品名稱。</p>
+          </div>
+        </div>
+
+        <div class="feat" style="margin-top:0">
+          <div class="feat-screen">
+            <div class="feat-bar">
+              <div class="feat-dot" style="background:#ff5f57"></div>
+              <div class="feat-dot" style="background:#febc2e"></div>
+              <div class="feat-dot" style="background:#28c840"></div>
+              <span class="feat-url">Lab52 庫存系統 — Hover 快速預覽</span>
+            </div>
+            <!-- EDIT: 截圖路徑 -->
+            <img src="Hover顯示.png" alt="Hover 快速預覽">
+          </div>
+          <div class="feat-body">
+            <span class="feat-tag">UX 細節</span>
+            <!-- EDIT: 說明 -->
+            <h3>Hover 快速預覽</h3>
+            <p>滑鼠移到任一產品列，右側即時浮出庫存詳情——不用點進去、不用換頁。查庫存通常是掃一眼，不是深入操作，hover 讓這個動作更直覺快速。</p>
+          </div>
+        </div>
+
+      </div>
+
+
+      <!-- Step: FBA 銷量同步 -->
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-date">Day 10–11 — FBA 銷量同步</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>庫存水位不夠，還要知道「還有幾天的貨」</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>FBA 的庫存數字本身沒那麼有用，我更想知道的是：按照現在的銷量，還有幾天的貨？</p>
+        <p>串接了 Amazon SP-API 的 <code>/sales/v1/orderMetrics</code>，拉過去 28 天訂單數據算出每個 ASIN 的日均銷量。庫存水位每小時自動同步，銷量每週一早上 7 點更新一次。</p>
+        <p>中間有個技術問題：hourly sync 每次重寫整個分頁，會把 weekly sync 才更新的銷量欄位清空。AI 設計了「欄位責任分離」——hourly sync 只動庫存欄，銷量欄用 ASIN 當 key 先讀出來，寫完之後再填回去。</p>
+
+      </div>
+
+
+      <!-- Step: 版本記錄 -->
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-date">Day 11 — 部署過程</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>80+ 個版本，反覆疊代</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>GAS 每次 deploy 都會留版本記錄。這是上線前的截圖——80+ 個版本（多到還刪過一輪），10 天，每一個都是「做了一點、測了一下、再調整」的循環。</p>
+
+        <div class="feat">
+          <div class="feat-screen">
+            <div class="feat-bar">
+              <div class="feat-dot" style="background:#ff5f57"></div>
+              <div class="feat-dot" style="background:#febc2e"></div>
+              <div class="feat-dot" style="background:#28c840"></div>
+              <span class="feat-url">Google Apps Script — 版本記錄</span>
+            </div>
+            <!-- EDIT: 截圖路徑 -->
+            <img src="專案記錄.png" alt="GAS 版本記錄">
+          </div>
+          <div class="feat-body">
+            <span class="feat-tag">開發過程截圖</span>
+            <!-- EDIT: 說明 -->
+            <h3>這就是 Vibe Coding 的樣子</h3>
+            <p>80+ 個版本，10 天。沒有詳細規格書，沒有排期，沒有 code review。用的、測的、改的——反覆循環直到它對了。</p>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- Step: 上線 -->
+      <div class="step">
+        <div class="step-dot done"></div>
+        <div class="step-date">June 11 — 上線</div>
+
+        <!-- EDIT: 標題 -->
+        <h2>10 天。上線了。</h2>
+
+        <!-- EDIT: 段落 -->
+        <p>從第一版 Node.js 到 GAS 重構，三個倉道統一管理，FBA 銷量自動同步，月費 $0。</p>
+
+        <div class="callout">
+          <!-- EDIT: callout -->
+          <p>從第一版到上線：<em>三個倉道、一個頁面、不需要本機伺服器、月費 $0。</em></p>
+        </div>
+
+        <div class="stats">
+          <!-- EDIT: 數字 -->
+          <div class="stat"><div class="stat-n">10天</div><div class="stat-l">開發週期</div></div>
+          <div class="stat"><div class="stat-n">80+</div><div class="stat-l">GAS 版本迭代</div></div>
+          <div class="stat"><div class="stat-n">3</div><div class="stat-l">倉道統一管理</div></div>
+          <div class="stat"><div class="stat-n">$0</div><div class="stat-l">月費</div></div>
+        </div>
+      </div>
+
+
+    </div><!-- /tl -->
+  </div><!-- /w -->
+</section>
+
+
+<!-- ══════════════════════════════════════
+  CHAPTER 3 DIVIDER
+══════════════════════════════════════ -->
+<div class="ch-divider">
+  <div class="w">
+    <!-- EDIT: 章節標籤 -->
+    <div class="ch-num">Chapter 03 &nbsp;·&nbsp; 反思</div>
+    <h2>Vibe Coding 是什麼</h2>
+    <p>從這兩個專案提煉出來的五個原則</p>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════
+  CHAPTER 3 CONTENT
+══════════════════════════════════════ -->
+<section class="chapter">
+  <div class="w">
+
+    <div class="principles">
+      <!-- EDIT: 五個原則 -->
+      <div class="principle">
+        <div class="p-num">1</div>
+        <div class="p-body">
+          <h3>先跑起來，再修問題</h3>
+          <p>不花時間在前期完美選型。Node.js 踩的那 6 個坑，不試是不會知道的。真實遇到的問題比預想的更具體，也更有解。</p>
+        </div>
+      </div>
+      <div class="principle">
+        <div class="p-num">2</div>
+        <div class="p-body">
+          <h3>業務邏輯由人決定，工程實作交給 AI</h3>
+          <p>幾天前觸發提醒、Sidebar 要唯讀還是可編輯、哪些欄位必填——這些問題 AI 無法替你決定，因為它不懂你的業務。</p>
+        </div>
+      </div>
+      <div class="principle">
+        <div class="p-num">3</div>
+        <div class="p-body">
+          <h3>架構轉換是里程碑，不是失敗</h3>
+          <p>從 Node.js 搬到 GAS 看起來是重做，但第一版的兩三天是用來搞清楚「我真正需要什麼」。重建的速度比第一次快很多，因為你已經知道答案了。</p>
+        </div>
+      </div>
+      <div class="principle">
+        <div class="p-num">4</div>
+        <div class="p-body">
+          <h3>問題紀錄即文件</h3>
+          <p>遇到的技術限制記入 AI memory，下次對話不重踩。協作是有記憶的。</p>
+        </div>
+      </div>
+      <div class="principle">
+        <div class="p-num">5</div>
+        <div class="p-body">
+          <h3>成本約束是架構決策的一部分</h3>
+          <p>「月費 $0」不是附加需求，是硬性約束。這個約束直接導向 GAS，而不是 Firebase、Vercel、Supabase。</p>
+        </div>
+      </div>
+    </div>
+
+    <h2 style="font-size:22px;color:var(--accent);margin:44px 0 18px;">我決定什麼，AI 決定什麼</h2>
+
+    <div class="div2">
+      <div class="div-col">
+        <h3>我決定的</h3>
+        <ul>
+          <!-- EDIT: 我的清單 -->
+          <li>需要哪些功能模組</li>
+          <li>哪些欄位、哪些分頁</li>
+          <li>幾天前觸發提醒才合理</li>
+          <li>Sidebar 要唯讀</li>
+          <li>IG DM 要一鍵跳轉</li>
+          <li>美國假日要標注在日曆</li>
+          <li>月費 $0 是硬性要求</li>
+          <li>這個太醜了，重做</li>
+        </ul>
+      </div>
+      <div class="div-col">
+        <h3>AI 決定的</h3>
+        <ul>
+          <!-- EDIT: AI 的清單 -->
+          <li>CORS 用 JSONP 繞過</li>
+          <li>GAS standalone API 限制與解法</li>
+          <li>node-sqlite3-wasm 六個限制逐一排除</li>
+          <li>SP-API 呼叫方式與 oauthScopes</li>
+          <li>浮動假日算法（第 n 個週幾）</li>
+          <li>主動加入 XSS 過濾和 URL 驗證</li>
+          <li>hourly vs weekly sync 欄位責任分離</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- EDIT: 備注 -->
+    <p style="font-size:14px;color:var(--muted);margin-top:14px;">我沒有要求安全防護，AI 自己加了。我說日期選擇器太醜，AI 重做了一個。我說要美國假日，AI 自己算了浮動算法。</p>
+
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════
+  CLOSING
+══════════════════════════════════════ -->
+<section class="closing">
+  <div class="w">
+    <p style="font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:var(--teal);margin-bottom:14px;">Key Takeaway</p>
+
+    <!-- EDIT: 結語標題 -->
+    <h2>Vibe Coding 不是「讓 AI 寫程式」</h2>
+
+    <!-- EDIT: 結語內文 -->
+    <p>
+      是讓一個懂業務、懂使用者的人，<br>
+      能夠把腦子裡的設計直接變成上線的工具。<br><br>
+      你不需要變成工程師。<br>
+      你需要清楚知道你要解決什麼問題。
+    </p>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════
+  FOOTER
+══════════════════════════════════════ -->
+<footer>
+  <!-- EDIT: footer 資訊 -->
+  <strong>Lab52</strong> &nbsp;·&nbsp; Shao Yu × Claude Sonnet 4.6 &nbsp;·&nbsp; 2026<br>
+  KOL Influencer Tracker &nbsp;·&nbsp; 庫存管理系統<br>
+  <span style="opacity:.55;">$0 / 月 &nbsp;·&nbsp; Google Apps Script &nbsp;·&nbsp; Google Sheets</span>
+</footer>
+
+
+</body>
+</html>
