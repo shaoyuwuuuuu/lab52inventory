@@ -2691,7 +2691,7 @@ var FBA_COLS = [
   {id:'inbound',  label:'入庫中'},
   {id:'reserved', label:'預留'},
   {id:'weeks',    label:'庫存週數'},
-  {id:'sales',    label:'日均銷量'}
+  {id:'sales',    label:'日均銷量', tooltip:'過去 7 天總出單 ÷ 7，每天早上 7 點自動更新'}
 ];
 
 var prodColOrder = null;
@@ -2721,6 +2721,13 @@ function buildInventoryColHead(cols, colOrder, extraState, saveKey, onReorder) {
     var th = document.createElement('th');
     th.style.cursor = 'grab';
     th.textContent = col.label;
+    if (col.tooltip) {
+      var tipIcon = document.createElement('span');
+      tipIcon.textContent = ' ⓘ';
+      tipIcon.title = col.tooltip;
+      tipIcon.style.cssText = 'cursor:help;color:var(--text3);font-size:.9em;font-weight:400;text-transform:none;letter-spacing:0;';
+      th.appendChild(tipIcon);
+    }
     if (col.id === 'inout' && !extraState.hasFilter) th.style.display = 'none';
 
     th.addEventListener('mousedown', function(e) {

@@ -1015,9 +1015,9 @@ function syncFbaSalesVelocity() {
   if (iSales < 0) { iSales = hdr.length;   sheet.getRange(1, iSales+1).setValue('日均銷量').setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff'); }
   if (iDate  < 0) { iDate  = iSales === hdr.length ? hdr.length+1 : hdr.length; sheet.getRange(1, iDate+1).setValue('銷量更新日').setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff'); }
 
-  // 過去 4 天區間
+  // 過去 7 天區間
   var now  = new Date();
-  var past = new Date(now.getTime() - 4 * 24 * 3600 * 1000);
+  var past = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
   function iso(d) { return d.toISOString().slice(0,19) + 'Z'; }
   var interval = iso(past) + '--' + iso(now);
   var today    = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd');
@@ -1041,7 +1041,7 @@ function syncFbaSalesVelocity() {
     if (resp.getResponseCode() === 200) {
       var payload = JSON.parse(resp.getContentText()).payload || [];
       var units   = payload.length > 0 ? (Number(payload[0].unitCount) || 0) : 0;
-      var daily   = Math.round((units / 4) * 10) / 10;
+      var daily   = Math.round((units / 7) * 10) / 10;
       sheet.getRange(i+1, iSales+1).setValue(daily);
       sheet.getRange(i+1, iDate+1).setValue(today);
       updated++;
@@ -1059,8 +1059,8 @@ function setupSalesTrigger() {
     if (t.getHandlerFunction() === 'syncFbaSalesVelocity') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('syncFbaSalesVelocity')
-    .timeBased().everyDays(4).atHour(7).create();
-  Logger.log('銷量自動同步 Trigger 已設定（每4天早上 7 點）');
+    .timeBased().everyDays(1).atHour(7).create();
+  Logger.log('銷量自動同步 Trigger 已設定（每天早上 7 點）');
 }
 
 // ── 補貨提醒 Email ────────────────────────────────────────────────────────────
