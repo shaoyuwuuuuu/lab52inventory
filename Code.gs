@@ -1003,6 +1003,13 @@ function writeFbaSheet_(summaries) {
     sheet.setFrozenRows(1);
   }
 
+  // 空結果就直接收工，不能往下走：下面是「先清空、後寫入」，
+  // 若清完才發現沒資料可寫，整張表（含日均銷量歷史）會被洗掉
+  if (summaries.length === 0) {
+    Logger.log('FBA 同步：summaries 為空，保留既有資料不覆寫');
+    return;
+  }
+
   // 保留現有銷量資料（按 ASIN 鍵值）
   var salesByAsin = {};
   if (sheet.getLastRow() > 1) {
@@ -1027,8 +1034,6 @@ function writeFbaSheet_(summaries) {
     sheet.getRange(1,1,1,FBA_HDR_.length).setValues([FBA_HDR_])
       .setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff');
   }
-
-  if (summaries.length === 0) return;
 
   var asinToEan = {};
   readProducts_().forEach(function(p) { if (p.asin) asinToEan[p.asin] = p.ean || ''; });
@@ -1088,10 +1093,10 @@ function setupFbaTrigger() {
   return { ok: true };
 }
 
-// ── FBA 銷量同步（每週一次） ───────────────────────────────────────────────────
+// ── FBA 銷量同步（每日一次，取過去 7 天） ─────────────────────────────────────
 // 執行步驟：
 //   1. 執行 syncFbaSalesVelocity() 立即同步一次
-//   2. 執行 setupSalesTrigger() 設定每週一早上自動同步
+//   2. 執行 setupSalesTrigger() 設定每天早上 7 點自動同步
 function syncFbaSalesVelocity() {
   var token  = getSpApiToken_();
   var mktId  = PropertiesService.getScriptProperties().getProperty('AMAZON_MARKETPLACE_ID') || 'ATVPDKIKX0DER';
