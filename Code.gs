@@ -15,13 +15,40 @@
 // ── Entry Point ───────────────────────────────────────────────────────────────
 
 function doGet(e) {
-  if (e && e.parameter && e.parameter.action === 'getData') {
-    var cb = e.parameter.callback || '';
-    var result = JSON.stringify(getAllData());
+  var action = (e && e.parameter && e.parameter.action) || '';
+  var cb     = (e && e.parameter && e.parameter.callback) || '';
+
+  function jsonOut(data) {
+    var str = JSON.stringify(data);
     return ContentService
-      .createTextOutput(cb ? cb + '(' + result + ')' : result)
+      .createTextOutput(cb ? cb + '(' + str + ')' : str)
       .setMimeType(cb ? ContentService.MimeType.JAVASCRIPT : ContentService.MimeType.JSON);
   }
+
+  if (action === 'getData') {
+    return jsonOut(getAllData());
+  }
+
+  // ── 新端點: 觸發 SP-API FBA 同步並回傳結果（給獨立 HTML 面板使用）
+  if (action === 'syncFba') {
+    try {
+      var res = syncFbaInventory();              // 打 SP-API，更新 FBA庫存 sheet
+      var fba = readFbaInventory_();             // 從 sheet 讀回
+      // syncFbaInventory 自己 catch 錯誤並回傳 {error}，不看回傳值會把失敗當成功
+      if (res && res.error) {
+        return jsonOut({ ok: false, error: res.error, fba: fba });  // fba 是舊快取
+      }
+      return jsonOut({ ok: true, count: res && res.count, fba: fba });
+    } catch(err) {
+      return jsonOut({ ok: false, error: err.message });
+    }
+  }
+
+  // ── 新端點: 只回傳當前 FBA 快取（不打 SP-API）
+  if (action === 'getFba') {
+    return jsonOut({ ok: true, fba: readFbaInventory_() });
+  }
+
   return HtmlService.createHtmlOutputFromFile('index')
     .setTitle('Lab52 庫存系統')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -357,6 +384,66 @@ function addTaiwanEntry(d) {
     });
     insertAtTop_(sheet, row);
     return { ok: true };
+  } catch(e) { return { error: e.message }; }
+}
+
+function replaceTaiwanInventory(rows) {
+  try {
+    var ss = ss_();
+    var sheet = ss.getSheetByName('TW_Movement');
+    if (!sheet) {
+      sheet = ss.insertSheet('TW_Movement');
+      sheet.appendRow(['date','ean','name','sku','boxes','qty_pcs','exp_date','note']);
+      sheet.getRange(1,1,1,8).setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff');
+      sheet.setFrozenRows(1);
+    }
+    // 備份舊資料（覆蓋前先存）
+    backupTaiwanSheet_(ss, sheet);
+    // 清除舊資料（保留標題列）
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      sheet.deleteRows(2, lastRow - 1);
+    }
+    // 批量寫入新資料
+    if (rows && rows.length > 0) {
+      var hdr = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+        .map(function(h) { return String(h).trim(); });
+      var data = rows.map(function(d) {
+        return hdr.map(function(h) {
+          if (h === 'date')     return d.date     || formatDate_(new Date());
+          if (h === 'ean')      return d.ean      || '';
+          if (h === 'name')     return d.name     || '';
+          if (h === 'sku')      return d.sku      || '';
+          if (h === 'boxes')    return parseFloat(d.boxes) || 0;
+          if (h === 'qty_pcs')  return d.qty_pcs  != null ? parseInt(d.qty_pcs) : '';
+          if (h === 'exp_date') return d.exp_date || '';
+          if (h === 'note')     return d.note     || '';
+          return '';
+        });
+      });
+      sheet.getRange(2, 1, data.length, hdr.length).setValues(data);
+    }
+    return { ok: true, count: rows ? rows.length : 0 };
+  } catch(e) { return { error: e.message }; }
+}
+
+function backupTaiwanSheet_(ss, sheet) {
+  var data = sheet.getDataRange().getValues();
+  PropertiesService.getScriptProperties().setProperty('TW_BACKUP', JSON.stringify(data));
+}
+
+function restoreTaiwanBackup() {
+  try {
+    var raw = PropertiesService.getScriptProperties().getProperty('TW_BACKUP');
+    if (!raw) return { error: '沒有可還原的備份' };
+    var backupData = JSON.parse(raw);
+    if (!backupData || backupData.length === 0) return { error: '備份資料為空' };
+    var ss = ss_();
+    var sheet = ss.getSheetByName('TW_Movement');
+    if (!sheet) sheet = ss.insertSheet('TW_Movement');
+    sheet.clearContents();
+    sheet.getRange(1, 1, backupData.length, backupData[0].length).setValues(backupData);
+    return { ok: true, count: backupData.length - 1 };
   } catch(e) { return { error: e.message }; }
 }
 
@@ -896,6 +983,16 @@ function syncFbaInventory() {
 
 var FBA_HDR_ = ['SKU','ASIN','EAN','產品名稱','可出貨數量','入庫中','預留數量','最後更新','狀態','日均銷量','銷量更新日'];
 
+// SP-API InventoryDetails 把「入庫途中」拆成三段，只取 shipped 會少算頭尾兩段：
+//   inboundWorkingQuantity   已建立入庫計畫、還沒給追蹤號
+//   inboundShippedQuantity   已出貨在途
+//   inboundReceivingQuantity 已到倉、收貨處理中
+function fbaInboundQty_(det) {
+  return (det.inboundWorkingQuantity   || 0)
+       + (det.inboundShippedQuantity   || 0)
+       + (det.inboundReceivingQuantity || 0);
+}
+
 function writeFbaSheet_(summaries) {
   var ss = ss_();
   var sheet = ss.getSheetByName('FBA庫存');
@@ -940,7 +1037,7 @@ function writeFbaSheet_(summaries) {
   var rows = summaries.map(function(s) {
     var det = s.inventoryDetails || {};
     var fulfillable = det.fulfillableQuantity || 0;
-    var inbound     = det.inboundShippedQuantity || 0;
+    var inbound     = fbaInboundQty_(det);
     var reserved    = (det.reservedQuantity && det.reservedQuantity.totalReservedQuantity) || 0;
     var status      = fulfillable <= 0 ? '❌ 缺貨' : (fulfillable < 50 ? '🟡 注意' : '✅ 正常');
     var ean         = asinToEan[s.asin] || '';
@@ -1096,6 +1193,12 @@ function sendRestockAlert() {
     twBoxByEan[m.ean] = (twBoxByEan[m.ean] || 0) + (parseFloat(m.boxes) || 0);
   });
 
+  // 海外倉庫存
+  var overseasBoxByEan = {};
+  readMovements_().forEach(function(m) {
+    overseasBoxByEan[m.ean] = (overseasBoxByEan[m.ean] || 0) + (parseFloat(m.boxes) || 0);
+  });
+
   var alerts = [];
   products.forEach(function(p) {
     if (!p.asin) return;
@@ -1109,9 +1212,15 @@ function sendRestockAlert() {
     var days = Math.round(effectiveQty / daily);
     if (days >= RESTOCK_TARGET_DAYS) return;
 
-    var shipBoxes = Math.ceil(Math.max(0, daily * RESTOCK_TARGET_DAYS - effectiveQty) / qpc / 5) * 5;
-    var twStock   = twBoxByEan[p.ean] || 0;
-    var source    = twStock >= shipBoxes ? '台灣倉' : (twStock > 0 ? '台灣倉（不足）' : '外倉');
+    var shipBoxes     = Math.ceil(Math.max(0, daily * RESTOCK_TARGET_DAYS - effectiveQty) / qpc / 5) * 5;
+    var twStock       = twBoxByEan[p.ean] || 0;
+    var overseasStock = overseasBoxByEan[p.ean] || 0;
+    var source;
+    if      (overseasStock >= shipBoxes) source = '海外倉';
+    else if (overseasStock > 0)          source = '海外倉（不足）';
+    else if (twStock >= shipBoxes)       source = '台灣倉';
+    else if (twStock > 0)                source = '台灣倉（不足）';
+    else                                 source = '缺貨';
 
     alerts.push({
       name: p.name, ean: p.ean, sku: p.sku, asin: p.asin,

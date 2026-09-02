@@ -268,7 +268,7 @@ tr:hover .prod-actions{opacity:1}
       <div class="px-3 pt-3 pb-2 d-flex align-items-center justify-content-between gap-2">
         <span class="fw-bold" style="font-size:.88rem;color:var(--text2);white-space:nowrap"><i class="bi bi-box-arrow-right me-1"></i>FBA 補貨建議</span>
         <div class="d-flex align-items-center gap-2">
-          <span class="text-muted" style="font-size:.75rem;white-space:nowrap">目標補到 90 天・5 箱倍數</span>
+          <span class="text-muted" style="font-size:.75rem;white-space:nowrap">目標補到 60 天・5 箱倍數</span>
           <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.72rem" onclick="exportFbaRestock()"><i class="bi bi-download me-1"></i>CSV</button>
         </div>
       </div>
@@ -344,6 +344,9 @@ tr:hover .prod-actions{opacity:1}
         <button class="btn btn-sm btn-outline-secondary" onclick="exportTaiwanCsv()">
           <i class="bi bi-download me-1"></i>匯出 CSV
         </button>
+        <button class="btn btn-sm btn-outline-warning" onclick="undoTaiwanImport()" title="還原上一次匯入">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>還原上一動
+        </button>
         <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('tw-xls-input').click()">
           <i class="bi bi-upload me-1"></i>匯入庫存 XLS
         </button>
@@ -359,9 +362,9 @@ tr:hover .prod-actions{opacity:1}
     </div>
     <!-- Import preview -->
     <div id="tw-import-preview" class="card p-3 mb-3" style="display:none;">
-      <div class="fw-semibold small mb-2"><i class="bi bi-table me-1"></i>匯入預覽 — 請確認後點「確認匯入」</div>
+      <div class="fw-semibold small mb-2"><i class="bi bi-table me-1"></i>匯入預覽 — 可修改數量／效期、刪除品項，確認後點「確認匯入」</div>
       <div class="table-responsive"><table class="table table-sm mb-2" id="tw-preview-table">
-        <thead><tr><th>EAN</th><th>產品名稱</th><th>pcs（原始）</th><th>換算箱數</th><th>效期</th></tr></thead>
+        <thead><tr><th>EAN</th><th>產品名稱</th><th style="width:90px">pcs</th><th>換算箱數</th><th style="width:120px">效期</th><th style="width:44px"></th></tr></thead>
         <tbody id="tw-preview-tbody"></tbody>
       </table></div>
       <div class="d-flex gap-2">
@@ -1169,7 +1172,7 @@ function renderDashboard() {
   }
 
   // ── FBA 補貨建議 ──────────────────────────────────────────────────────────
-  var TARGET_DAYS = 90;
+  var TARGET_DAYS = 60;
   _restockRows = [];
   (S.products || []).forEach(function(p) {
     if (!p.asin) return;
@@ -1184,9 +1187,15 @@ function renderDashboard() {
     var days = Math.round(effectiveQty / daily);
     if (days >= TARGET_DAYS) return;
 
-    var shipBoxes = Math.ceil(Math.max(0, daily * TARGET_DAYS - effectiveQty) / qpc / 5) * 5;
-    var twStock   = twBoxByEan[p.ean] || 0;
-    var source    = twStock >= shipBoxes ? '台灣倉' : twStock > 0 ? '台灣倉（不足）' : '外倉';
+    var shipBoxes     = Math.ceil(Math.max(0, daily * TARGET_DAYS - effectiveQty) / qpc / 5) * 5;
+    var twStock       = twBoxByEan[p.ean] || 0;
+    var overseasStock = overseasBoxByEan[p.ean] || 0;
+    var source;
+    if      (overseasStock >= shipBoxes) source = '海外倉';
+    else if (overseasStock > 0)          source = '海外倉（不足）';
+    else if (twStock >= shipBoxes)       source = '台灣倉';
+    else if (twStock > 0)                source = '台灣倉（不足）';
+    else                                 source = '缺貨';
     _restockRows.push({ name: p.name, ean: p.ean || '', sku: p.sku || '', days: days, shipBoxes: shipBoxes, source: source });
   });
   // order follows S.products — no re-sort
@@ -1198,7 +1207,7 @@ function renderDashboard() {
       return (r.name||'').toLowerCase().indexOf(_dashQ)>=0 || (r.ean||'').toLowerCase().indexOf(_dashQ)>=0 || (r.sku||'').toLowerCase().indexOf(_dashQ)>=0;
     }) : _restockRows;
     restockEl.innerHTML = _visRestock.length === 0
-      ? '<p class="text-muted small px-3 pb-3 mb-0">所有產品 FBA 庫存充足（≥90天）</p>'
+      ? '<p class="text-muted small px-3 pb-3 mb-0">所有產品 FBA 庫存充足（≥60天）</p>'
       : '<div class="table-responsive"><table id="fba-restock-tbl" class="table table-hover mb-0">'
         + '<thead><tr><th>產品</th><th>EAN</th><th>SKU</th><th>剩餘天數</th><th>建議出貨</th><th>來源</th><th>備註</th></tr></thead><tbody>'
         + _visRestock.map(function(r) {
@@ -1962,15 +1971,17 @@ function renderFba() {
   if (hasSales) {
     ok   = rows.filter(function(r){
       var d = Number(r['日均銷量']); if (!d) return false;
-      return (r['可出貨數量']||0) / (d*7) >= 10;
+      var q = (r['可出貨數量']||0) + (r['入庫中']||0) + (r['預留數量']||0);
+      return q / (d*7) >= 10;
     }).length;
     warn = rows.filter(function(r){
-      var d = Number(r['日均銷量']); var q = r['可出貨數量']||0;
-      if (!d) return false;
+      var d = Number(r['日均銷量']); if (!d) return false;
+      var q = (r['可出貨數量']||0) + (r['入庫中']||0) + (r['預留數量']||0);
       var w = q/(d*7); return w >= 4 && w < 10;
     }).length;
     out  = rows.filter(function(r){
-      var q = r['可出貨數量']||0; if (q <= 0) return true;
+      var q = (r['可出貨數量']||0) + (r['入庫中']||0) + (r['預留數量']||0);
+      if (q <= 0) return true;
       var d = Number(r['日均銷量']); if (!d) return false;
       return q/(d*7) < 4;
     }).length;
@@ -1987,12 +1998,30 @@ function renderFba() {
   setEl('fba-stat-warn',  total ? warn : '—');
   setEl('fba-stat-out',   total ? out  : '—');
 
-  // 同步時間
+  // 同步時間（GAS trigger 每小時跑一次，超過 3 小時沒更新代表同步掛了）
+  var STALE_HOURS = 3;
   var syncParts = [];
-  if (rows.length > 0 && rows[0]['最後更新']) syncParts.push('庫存：' + rows[0]['最後更新']);
+  var lastSync  = rows.length > 0 ? rows[0]['最後更新'] : '';
+  if (lastSync) syncParts.push('庫存：' + lastSync);
   var salesDate = rows.find(function(r){ return r['銷量更新日']; });
   if (salesDate) syncParts.push('銷量：' + salesDate['銷量更新日']);
-  if (syncParts.length) setEl('fba-sync-time', '上次同步 — ' + syncParts.join('　'));
+  if (syncParts.length) {
+    var staleHrs = lastSync
+      ? (Date.now() - new Date(String(lastSync).replace(' ', 'T'))) / 36e5
+      : 0;
+    var isStale = staleHrs >= STALE_HOURS;
+    var staleTxt = staleHrs < 48
+      ? Math.floor(staleHrs) + ' 小時'
+      : Math.floor(staleHrs / 24) + ' 天';
+    setEl('fba-sync-time',
+      (isStale ? '⚠️ 同步已停擺 ' + staleTxt + ' — ' : '上次同步 — ') + syncParts.join('　'));
+    var syncEl = document.getElementById('fba-sync-time');
+    if (syncEl) {
+      syncEl.classList.toggle('text-muted', !isStale);
+      syncEl.style.color      = isStale ? 'var(--danger-text)' : '';
+      syncEl.style.fontWeight = isStale ? '600' : '';
+    }
+  }
 
   // Default order: match 庫存總覽 product order
   var asinOrder = {};
@@ -2039,7 +2068,12 @@ function renderFbaCell(ci, rowData) {
     case 'qty':      return '<td>' + qHtml + '</td>';
     case 'inbound':  return '<td>' + (r['入庫中']||0) + '</td>';
     case 'reserved': return '<td>' + (r['預留數量']||0) + '</td>';
-    case 'status':   return '<td>' + (qty <= 0 ? '<span class="badge bg-danger">缺貨</span>' : '<span class="text-muted">—</span>') + '</td>';
+    case 'status': {
+      if (qty <= 0) return '<td><span class="badge bg-danger">缺貨</span></td>';
+      var _d = Number(r['日均銷量']);
+      if (_d > 0 && qty / (_d * 7) < 4) return '<td><span class="badge bg-danger">&lt; 4 週</span></td>';
+      return '<td><span class="text-muted">—</span></td>';
+    }
     case 'sales': {
       var d = r['日均銷量'];
       if (d === null || d === undefined || d === '') return '<td><span class="text-muted">—</span></td>';
@@ -2225,15 +2259,50 @@ function handleTaiwanImport(file) {
       var boxes = qpc > 0 ? Math.round(r.pcs / qpc * 10) / 10 : r.pcs;
       return { ean: r.ean, name: prod.name || r.ean, pcs: r.pcs, boxes: boxes, exp: r.exp, qpc: qpc };
     });
-    var tbody = document.getElementById('tw-preview-tbody');
-    tbody.innerHTML = _twImportRows.map(function(r) {
-      var boxStr = r.qpc > 0 ? r.boxes.toFixed(1)+' 箱' : r.pcs+' pcs（找不到每箱pcs，需手動換算）';
-      return '<tr><td>'+escHtml(r.ean)+'</td><td>'+escHtml(r.name)+'</td><td>'+r.pcs+'</td><td>'+boxStr+'</td><td>'+(r.exp||'—')+'</td></tr>';
-    }).join('');
+    renderTwPreviewTable();
     document.getElementById('tw-import-preview').style.display = '';
     document.getElementById('tw-xls-input').value = '';
   };
   reader.readAsText(file, 'big5');
+}
+
+function renderTwPreviewTable() {
+  var tbody = document.getElementById('tw-preview-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = _twImportRows.map(function(r, i) {
+    var boxes = r.qpc > 0 ? Math.round(r.pcs / r.qpc * 10) / 10 : r.pcs;
+    var boxLabel = r.qpc > 0
+      ? '<span id="tw-box-'+i+'">' + boxes.toFixed(1) + ' 箱</span>'
+      : '<span id="tw-box-'+i+'" class="text-muted small">' + r.pcs + ' pcs（需手動換算）</span>';
+    return '<tr>'
+      + '<td class="small text-muted">' + escHtml(r.ean) + '</td>'
+      + '<td>' + escHtml(r.name) + '</td>'
+      + '<td><input type="number" class="form-control form-control-sm" id="tw-pcs-'+i+'" value="'+r.pcs+'" min="1"'
+      + ' style="width:78px" oninput="updateTwBox('+i+','+r.qpc+')"></td>'
+      + '<td>' + boxLabel + '</td>'
+      + '<td><input type="text" class="form-control form-control-sm" id="tw-exp-'+i+'" value="'+escHtml(r.exp||'')+'"'
+      + ' placeholder="yyyy-mm-dd" style="width:112px"></td>'
+      + '<td><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteTwPreviewRow('+i+')" title="刪除">'
+      + '<i class="bi bi-trash"></i></button></td>'
+      + '</tr>';
+  }).join('');
+}
+
+function updateTwBox(idx, qpc) {
+  var inp = document.getElementById('tw-pcs-' + idx);
+  var el  = document.getElementById('tw-box-' + idx);
+  if (!inp || !el) return;
+  var pcs = parseInt(inp.value) || 0;
+  el.textContent = qpc > 0 ? (Math.round(pcs / qpc * 10) / 10).toFixed(1) + ' 箱' : pcs + ' pcs';
+}
+
+function deleteTwPreviewRow(idx) {
+  _twImportRows.splice(idx, 1);
+  if (!_twImportRows.length) {
+    document.getElementById('tw-import-preview').style.display = 'none';
+  } else {
+    renderTwPreviewTable();
+  }
 }
 
 function confirmTaiwanImport() {
@@ -2241,30 +2310,47 @@ function confirmTaiwanImport() {
   if (btn && btn.disabled) return;
   if (!_twImportRows.length) return;
   if (!GAS_MODE) { showToast('本機模式無法寫入，請部署到 GAS 後操作', 'error'); return; }
-  var total = _twImportRows.length;
+  // 讀回使用者在預覽表格中修改的值
+  _twImportRows = _twImportRows.map(function(r, i) {
+    var pcsEl = document.getElementById('tw-pcs-' + i);
+    var expEl = document.getElementById('tw-exp-' + i);
+    var pcs   = pcsEl ? (parseInt(pcsEl.value) || r.pcs) : r.pcs;
+    var exp   = expEl ? expEl.value.trim() : (r.exp || '');
+    var boxes = r.qpc > 0 ? Math.round(pcs / r.qpc * 10) / 10 : pcs;
+    return Object.assign({}, r, { pcs: pcs, boxes: boxes, exp: exp || null });
+  });
   var today = new Date().toISOString().slice(0,10);
-  var queue = _twImportRows.slice();
-  var done = 0;
-  if (btn) { btn.disabled = true; btn.textContent = '匯入中 0/'+total+'…'; }
-  function next() {
-    if (!queue.length) {
-      if (btn) { btn.disabled = false; btn.textContent = '確認匯入'; }
-      showToast('已匯入 '+done+' 筆台灣倉庫存', 'success');
-      document.getElementById('tw-import-preview').style.display = 'none';
-      _twImportRows = [];
-      syncData();
-      return;
-    }
-    var r = queue.shift();
-    if (btn) btn.textContent = '匯入中 '+done+'/'+total+'…';
+  var payload = _twImportRows.map(function(r) {
     var p = S.products.find(function(x){ return x.ean === r.ean; }) || {};
-    gasCall('addTaiwanEntry', {
-      ean: r.ean, name: p.name||'', sku: p.sku||'',
-      date: today, boxes: r.boxes, qty_pcs: r.pcs,
-      exp_date: r.exp||'', note: ''
-    }, function() { done++; next(); }, function() { done++; next(); });
-  }
-  next();
+    return { ean: r.ean, name: p.name||'', sku: p.sku||'',
+             date: today, boxes: r.boxes, qty_pcs: r.pcs,
+             exp_date: r.exp||'', note: '' };
+  });
+  if (btn) { btn.disabled = true; btn.textContent = '匯入中…'; }
+  gasCall('replaceTaiwanInventory', payload, function(res) {
+    if (btn) { btn.disabled = false; btn.textContent = '確認匯入'; }
+    showToast('已覆蓋台灣倉庫存，共 '+(res&&res.count||payload.length)+' 筆', 'success');
+    document.getElementById('tw-import-preview').style.display = 'none';
+    _twImportRows = [];
+    syncData();
+  }, function(e) {
+    if (btn) { btn.disabled = false; btn.textContent = '確認匯入'; }
+    showToast('匯入失敗：' + e, 'error');
+  });
+}
+
+function undoTaiwanImport() {
+  if (!confirm('確定要還原上一次台灣倉匯入的資料嗎？')) return;
+  gasCall('restoreTaiwanBackup', null, function(res) {
+    if (res && res.ok) {
+      showToast('已還原，共 ' + (res.count || 0) + ' 筆', 'success');
+      syncData();
+    } else {
+      showToast('還原失敗：' + (res && res.error || '沒有備份'), 'error');
+    }
+  }, function(e) {
+    showToast('還原失敗：' + e, 'error');
+  });
 }
 
 function renderManualTransit() {
