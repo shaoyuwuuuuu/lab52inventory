@@ -1999,17 +1999,30 @@ function renderFba() {
   setEl('fba-stat-out',   total ? out  : '—');
 
   // 同步時間（GAS trigger 每小時跑一次，超過 3 小時沒更新代表同步掛了）
-  var STALE_HOURS = 3;
+  var STALE_HOURS       = 3;    // 庫存每小時同步
+  var SALES_STALE_HOURS = 30;   // 銷量每天同步一次，多留 6 小時緩衝才算停擺
   var syncParts = [];
   var lastSync  = rows.length > 0 ? rows[0]['最後更新'] : '';
   if (lastSync) syncParts.push('庫存：' + lastSync);
-  var salesDate = rows.find(function(r){ return r['銷量更新日']; });
-  if (salesDate) syncParts.push('銷量：' + salesDate['銷量更新日']);
+  // 取最舊的銷量更新日。每支 ASIN 是獨立呼叫的，失敗的那支會留著舊日期，
+  // 原本取「第一個有值的列」會被成功的那列蓋掉，失敗就看不出來了。
+  var salesDates  = rows.map(function(r){ return r['銷量更新日']; })
+                        .filter(Boolean).map(String).sort();
+  var oldestSales = salesDates.length ? salesDates[0] : '';
+  if (oldestSales) syncParts.push('銷量：' + oldestSales);
   if (syncParts.length) {
-    var staleHrs = lastSync
-      ? (Date.now() - new Date(String(lastSync).replace(' ', 'T'))) / 36e5
-      : 0;
-    var isStale = staleHrs >= STALE_HOURS;
+    function hoursSince(v) {
+      if (!v) return 0;
+      var t = new Date(String(v).replace(' ', 'T'));
+      return isNaN(t.getTime()) ? 0 : (Date.now() - t.getTime()) / 36e5;
+    }
+    var invHrs   = hoursSince(lastSync);
+    var salesHrs = hoursSince(oldestSales);
+    // 各自用自己的門檻判斷，再取比較嚴重的那個來顯示時數
+    var invStale   = invHrs   >= STALE_HOURS;
+    var salesStale = salesHrs >= SALES_STALE_HOURS;
+    var isStale  = invStale || salesStale;
+    var staleHrs = Math.max(invStale ? invHrs : 0, salesStale ? salesHrs : 0);
     var staleTxt = staleHrs < 48
       ? Math.floor(staleHrs) + ' 小時'
       : Math.floor(staleHrs / 24) + ' 天';
