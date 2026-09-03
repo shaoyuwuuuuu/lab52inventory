@@ -964,14 +964,17 @@ function setupFbaCredentials() {
 
 function getSpApiToken_() {
   var p = PropertiesService.getScriptProperties();
+  // trim：憑證常常是從文件複製貼進「指令碼屬性」的，很容易夾帶尾端空白或換行，
+  // 那會讓 Amazon 回 invalid_client，錯誤訊息卻看不出是空白造成的
+  function prop(k) { return String(p.getProperty(k) || '').trim(); }
   var resp = UrlFetchApp.fetch('https://api.amazon.com/auth/o2/token', {
     method: 'post',
     contentType: 'application/x-www-form-urlencoded',
     payload: {
       grant_type:    'refresh_token',
-      refresh_token: p.getProperty('AMAZON_REFRESH_TOKEN'),
-      client_id:     p.getProperty('AMAZON_CLIENT_ID'),
-      client_secret: p.getProperty('AMAZON_CLIENT_SECRET')
+      refresh_token: prop('AMAZON_REFRESH_TOKEN'),
+      client_id:     prop('AMAZON_CLIENT_ID'),
+      client_secret: prop('AMAZON_CLIENT_SECRET')
     },
     muteHttpExceptions: true
   });
@@ -1182,7 +1185,11 @@ function diagFbaSync() {
   ['AMAZON_REFRESH_TOKEN','AMAZON_CLIENT_ID','AMAZON_CLIENT_SECRET','AMAZON_MARKETPLACE_ID']
     .forEach(function(k) {
       var v = p.getProperty(k);
-      say('[1 設定] ' + k + ' → ' + (v ? '已設定（長度 ' + String(v).length + '）' : '★ 未設定 ★'));
+      if (!v) { say('[1 設定] ' + k + ' → ★ 未設定 ★'); return; }
+      var t = String(v).trim();
+      say('[1 設定] ' + k + ' → 已設定（長度 ' + String(v).length + '）'
+          + (t.length !== String(v).length
+              ? '　★ 含前後空白／換行，實際內容長度 ' + t.length + ' ★' : ''));
     });
 
   // 2. Trigger 還在不在
