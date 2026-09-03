@@ -1011,10 +1011,41 @@ function syncFbaInventory() {
 
     writeFbaSheet_(summaries);
     Logger.log('FBA 庫存同步完成：' + summaries.length + ' 筆');
+    // 0 筆不是例外，但表格會保留舊資料不更新，一樣要讓人知道
+    if (summaries.length === 0) {
+      notifySyncFailure_('FBA 庫存同步',
+        'SP-API 有正常回應，但回傳的 ASIN 沒有一個對得上「庫存總覽」，表格保留舊資料未更新。');
+    }
     return { ok: true, count: summaries.length };
   } catch(e) {
     Logger.log('syncFbaInventory 錯誤：' + e.message);
+    notifySyncFailure_('FBA 庫存同步', e.message);
     return { error: e.message };
+  }
+}
+
+// 同步失敗通知。
+// 原本錯誤只寫進 Logger.log 就 return 掉，從 trigger 執行時回傳值沒人接、
+// Logger 沒人看，對 Google 而言每次都「執行成功」，所以既不會被停用也不會
+// 有失敗摘要信 —— 這就是同步能無聲停擺 16 天的原因。改成主動寄信。
+// 節流：同一種失敗 6 小時內只寄一次，免得每小時的 trigger 洗爆信箱。
+var SYNC_ALERT_THROTTLE_HOURS_ = 6;
+
+function notifySyncFailure_(what, detail) {
+  try {
+    var p    = PropertiesService.getScriptProperties();
+    var key  = 'SYNC_ALERT_' + what;
+    var last = Number(p.getProperty(key) || 0);
+    var now  = new Date().getTime();
+    if (last && (now - last) < SYNC_ALERT_THROTTLE_HOURS_ * 3600 * 1000) return;
+    p.setProperty(key, String(now));
+    GmailApp.sendEmail(RESTOCK_ALERT_EMAIL, '[Lab52 庫存] ' + what + '失敗',
+      what + ' 執行失敗：\n\n' + detail
+      + '\n\n請到 GAS 編輯器執行 diagFbaSync() 看是斷在哪一層。'
+      + '\n（同一種失敗每 ' + SYNC_ALERT_THROTTLE_HOURS_ + ' 小時最多通知一次）');
+    Logger.log('[SyncAlert] 已通知 ' + RESTOCK_ALERT_EMAIL + '：' + what);
+  } catch(e) {
+    Logger.log('notifySyncFailure_ 自己也失敗了：' + e.message);
   }
 }
 
@@ -1138,6 +1169,116 @@ function resetFbaSheet() {
   return syncFbaInventory();
 }
 
+// ── 診斷：FBA 同步為什麼沒在跑 ────────────────────────────────────────────────
+// 在 GAS 編輯器選 diagFbaSync 按執行，然後看下方「執行紀錄」。
+// 逐層檢查 憑證設定 → Trigger → LWA token → SP-API → 分頁時間，指出斷在哪一層。
+// 只印出設定「是否存在」與長度，不會印出憑證內容。
+function diagFbaSync() {
+  var lines = [];
+  function say(s) { lines.push(s); Logger.log(s); }
+
+  // 1. 憑證設定是否存在
+  var p = PropertiesService.getScriptProperties();
+  ['AMAZON_REFRESH_TOKEN','AMAZON_CLIENT_ID','AMAZON_CLIENT_SECRET','AMAZON_MARKETPLACE_ID']
+    .forEach(function(k) {
+      var v = p.getProperty(k);
+      say('[1 設定] ' + k + ' → ' + (v ? '已設定（長度 ' + String(v).length + '）' : '★ 未設定 ★'));
+    });
+
+  // 2. Trigger 還在不在
+  var trs = ScriptApp.getProjectTriggers();
+  say('[2 Trigger] 專案共 ' + trs.length + ' 個');
+  trs.forEach(function(t) {
+    say('[2 Trigger] ' + t.getHandlerFunction() + '（' + t.getEventType() + '）');
+  });
+  ['syncFbaInventory','syncFbaSalesVelocity'].forEach(function(fn) {
+    var found = trs.some(function(t){ return t.getHandlerFunction() === fn; });
+    if (!found) say('[2 Trigger] ★ 找不到 ' + fn + ' 的 trigger，這個同步根本不會自己跑 ★');
+  });
+
+  // 3. LWA 換 token（Amazon 的錯誤回應只有錯誤碼，不含憑證內容）
+  var token = null;
+  try {
+    var tResp = UrlFetchApp.fetch('https://api.amazon.com/auth/o2/token', {
+      method: 'post',
+      contentType: 'application/x-www-form-urlencoded',
+      payload: {
+        grant_type:    'refresh_token',
+        refresh_token: p.getProperty('AMAZON_REFRESH_TOKEN'),
+        client_id:     p.getProperty('AMAZON_CLIENT_ID'),
+        client_secret: p.getProperty('AMAZON_CLIENT_SECRET')
+      },
+      muteHttpExceptions: true
+    });
+    say('[3 LWA] HTTP ' + tResp.getResponseCode());
+    var tBody = tResp.getContentText();
+    var tData = {};
+    try { tData = JSON.parse(tBody); } catch(_) {}
+    if (tData.access_token) { token = tData.access_token; say('[3 LWA] access_token 取得成功'); }
+    else say('[3 LWA] ★ 失敗 ★ ' + String(tBody).slice(0, 400));
+  } catch(e) {
+    say('[3 LWA] ★ 例外 ★ ' + e.message);
+  }
+
+  // 4. 真的打一次 SP-API 庫存查詢
+  if (!token) {
+    say('[4 SP-API] 跳過（沒拿到 token，問題在第 3 層以前）');
+  } else {
+    var mkt = p.getProperty('AMAZON_MARKETPLACE_ID') || 'ATVPDKIKX0DER';
+    try {
+      var iResp = UrlFetchApp.fetch(
+        'https://sellingpartnerapi-na.amazon.com/fba/inventory/v1/summaries'
+          + '?granularityType=Marketplace&granularityId=' + mkt
+          + '&marketplaceIds=' + mkt + '&details=true',
+        { method: 'get',
+          headers: { 'x-amz-access-token': token, 'Content-Type': 'application/json' },
+          muteHttpExceptions: true });
+      var iCode = iResp.getResponseCode();
+      say('[4 SP-API] HTTP ' + iCode);
+      if (iCode !== 200) {
+        say('[4 SP-API] ★ 回應 ★ ' + String(iResp.getContentText()).slice(0, 500));
+      } else {
+        var sums = (JSON.parse(iResp.getContentText()).payload || {}).inventorySummaries || [];
+        var tracked = readProducts_().map(function(x){ return x.asin; }).filter(Boolean);
+        var hit = sums.filter(function(s){ return tracked.indexOf(s.asin) >= 0; });
+        say('[4 SP-API] Amazon 回傳 ' + sums.length + ' 筆；庫存總覽有 ' + tracked.length
+            + ' 個 ASIN，對得上 ' + hit.length + ' 筆');
+        if (sums.length && !hit.length) {
+          say('[4 SP-API] ★ 一筆都對不上，同步會保留舊資料不覆寫 ★');
+          say('[4 SP-API] Amazon 前 3 個 ASIN：' + sums.slice(0,3).map(function(s){ return s.asin; }).join(', '));
+          say('[4 SP-API] 庫存總覽前 3 個 ASIN：' + tracked.slice(0,3).join(', '));
+        }
+        // 入庫中三段各自的數字，用來確認 fbaInboundQty_ 的修正是否吃到資料
+        hit.slice(0, 3).forEach(function(s) {
+          var d = s.inventoryDetails || {};
+          say('[4 入庫中] ' + s.asin
+              + ' 可出貨=' + (d.fulfillableQuantity || 0)
+              + ' working=' + (d.inboundWorkingQuantity || 0)
+              + ' shipped=' + (d.inboundShippedQuantity || 0)
+              + ' receiving=' + (d.inboundReceivingQuantity || 0)
+              + ' 合計入庫中=' + fbaInboundQty_(d));
+        });
+      }
+    } catch(e) {
+      say('[4 SP-API] ★ 例外 ★ ' + e.message);
+    }
+  }
+
+  // 5. 分頁現在的時間戳
+  var fba = ss_().getSheetByName('FBA庫存');
+  if (!fba || fba.getLastRow() < 2) {
+    say('[5 分頁] FBA庫存 沒有資料列');
+  } else {
+    var vals = fba.getDataRange().getValues();
+    var hd   = vals[0].map(function(h){ return String(h).trim(); });
+    var ci   = hd.indexOf('最後更新'), cs = hd.indexOf('銷量更新日');
+    say('[5 分頁] 共 ' + (vals.length - 1) + ' 列，最後更新=' + (ci >= 0 ? vals[1][ci] : '?')
+        + '，銷量更新日=' + (cs >= 0 ? vals[1][cs] : '?'));
+  }
+
+  return lines.join('\n');
+}
+
 function setupFbaTrigger() {
   ScriptApp.getProjectTriggers().forEach(function(t) {
     if (t.getHandlerFunction() === 'syncFbaInventory') ScriptApp.deleteTrigger(t);
@@ -1151,7 +1292,19 @@ function setupFbaTrigger() {
 // 執行步驟：
 //   1. 執行 syncFbaSalesVelocity() 立即同步一次
 //   2. 執行 setupSalesTrigger() 設定每天早上 7 點自動同步
+// Trigger 掛的是這個名字，維持不變才不用重設 trigger。
+// 這層只負責：失敗時先寄信通知，再把錯誤原樣往上丟
+// （繼續讓 Google 記錄成失敗，trigger 失敗摘要才看得到）。
 function syncFbaSalesVelocity() {
+  try {
+    return syncFbaSalesVelocity_();
+  } catch(e) {
+    notifySyncFailure_('FBA 銷量同步', e.message);
+    throw e;
+  }
+}
+
+function syncFbaSalesVelocity_() {
   var token  = getSpApiToken_();
   var mktId  = PropertiesService.getScriptProperties().getProperty('AMAZON_MARKETPLACE_ID') || 'ATVPDKIKX0DER';
   var sheet  = ss_().getSheetByName('FBA庫存');
@@ -1208,6 +1361,11 @@ function syncFbaSalesVelocity() {
     Utilities.sleep(2100); // 尊重 0.5 req/s 限制
   }
   Logger.log('銷量同步完成：' + updated + ' 筆更新，' + failed + ' 筆失敗');
+  // 每支 ASIN 的失敗原本只寫 Logger，整批全掛也照樣「執行成功」
+  if (failed > 0 && updated === 0) {
+    notifySyncFailure_('FBA 銷量同步', '全部 ' + failed + ' 個 ASIN 都查詢失敗，日均銷量未更新。');
+  }
+  return { ok: true, updated: updated, failed: failed };
 }
 
 function setupSalesTrigger() {
