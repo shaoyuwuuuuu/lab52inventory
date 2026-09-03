@@ -1048,7 +1048,14 @@ function notifySyncFailure_(what, detail) {
       + '\n（同一種失敗每 ' + SYNC_ALERT_THROTTLE_HOURS_ + ' 小時最多通知一次）');
     Logger.log('[SyncAlert] 已通知 ' + RESTOCK_ALERT_EMAIL + '：' + what);
   } catch(e) {
+    // 通知自己掛掉時沒辦法再用通知回報，至少把痕跡留在指令碼屬性裡，
+    // diagFbaSync() 會印出來，否則就變成「連告警壞掉都沒人知道」
     Logger.log('notifySyncFailure_ 自己也失敗了：' + e.message);
+    try {
+      PropertiesService.getScriptProperties().setProperty('SYNC_ALERT_LAST_ERROR',
+        Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
+        + '　' + e.message);
+    } catch(_) {}
   }
 }
 
@@ -1242,6 +1249,11 @@ function diagFbaSync() {
       }
     });
 
+  // 1b. 通知管道自己有沒有壞掉（notifySyncFailure_ 寄信失敗時會留下這筆）
+  var alertErr = p.getProperty('SYNC_ALERT_LAST_ERROR');
+  say('[1 通知] 收件人 ' + RESTOCK_ALERT_EMAIL
+      + (alertErr ? '　★ 上次寄信失敗：' + alertErr + ' ★' : '　（沒有寄信失敗紀錄）'));
+
   // 2. Trigger 還在不在
   var trs = ScriptApp.getProjectTriggers();
   say('[2 Trigger] 專案共 ' + trs.length + ' 個');
@@ -1428,13 +1440,29 @@ function checkInventoryFreshness_() {
 }
 
 // 一鍵驗證通知管道真的通。沒測過的告警等於沒有告警。
-// 執行後應該會在 RESTOCK_ALERT_EMAIL 收到一封信。
+// 這支刻意「不」透過 notifySyncFailure_，也刻意不 catch —— 寄不出去就要讓例外
+// 直接浮到執行紀錄。第一版走 notifySyncFailure_，結果它把自己的錯誤也吞掉，
+// 寄失敗還是回傳 ok:true，等於重蹈同步無聲失敗的覆轍。
 function testSyncAlert() {
-  var what = '通知管道測試';
-  PropertiesService.getScriptProperties().deleteProperty('SYNC_ALERT_' + what);  // 跳過 6 小時節流
-  notifySyncFailure_(what, '這是一封測試信。收到它，就代表 FBA 同步出問題時你會被通知。');
-  Logger.log('測試信已送出至 ' + RESTOCK_ALERT_EMAIL + '，請檢查收件匣（含垃圾郵件）。');
-  return { ok: true, sentTo: RESTOCK_ALERT_EMAIL };
+  var to = RESTOCK_ALERT_EMAIL;
+  Logger.log('[測試] 收件人：' + to);
+  try {
+    Logger.log('[測試] 指令碼執行帳號：' + Session.getEffectiveUser().getEmail());
+  } catch(e) {
+    Logger.log('[測試] 取不到執行帳號：' + e.message);
+  }
+  try {
+    Logger.log('[測試] 今日剩餘寄信額度：' + MailApp.getRemainingDailyQuota());
+  } catch(e) {
+    Logger.log('[測試] 取不到寄信額度：' + e.message);
+  }
+
+  GmailApp.sendEmail(to, '[Lab52 庫存] 通知管道測試',
+    '這是一封測試信。收到它，就代表 FBA 同步出問題時你會被通知。');
+
+  Logger.log('[測試] sendEmail 呼叫完成、未拋出例外 → 信已交給 Gmail');
+  Logger.log('[測試] 若仍未收到：檢查垃圾郵件，以及 ' + to + ' 端的過濾規則');
+  return { ok: true, sentTo: to };
 }
 
 function syncFbaSalesVelocity_() {
