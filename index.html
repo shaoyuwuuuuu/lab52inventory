@@ -455,32 +455,39 @@ tr:hover .prod-actions{opacity:1}
       <div class="page-title mb-0"><i class="bi bi-box-seam me-2"></i>FBA庫存</div>
       <span id="fba-sync-time" class="text-muted" style="font-size:.78rem;"></span>
     </div>
-    <!-- 卡住庫存警示：不可售 + 調查中，賣不出去且需要人為處理 -->
-    <div id="fba-stuck-warn" class="mb-3" style="display:none"></div>
+    <!-- col-md 讓五張卡等寬填滿，不用改成 col-md-2 留下空隙 -->
     <div class="row g-3 mb-3">
-      <div class="col-6 col-md-3">
+      <div class="col-6 col-md">
         <div class="card stat-card blue p-3 h-100">
           <div style="font-size:.75rem;color:var(--text3)">追蹤產品</div>
           <div class="fw-bold fs-5" id="fba-stat-total">—</div>
           <div style="font-size:.72rem;color:var(--text3)" id="fba-stat-total-units"></div>
         </div>
       </div>
-      <div class="col-6 col-md-3">
+      <div class="col-6 col-md">
         <div class="card stat-card green p-3 h-100">
           <div style="font-size:.75rem;color:var(--text3)">充足（≥10週）</div>
           <div class="fw-bold fs-5 text-success" id="fba-stat-ok">—</div>
         </div>
       </div>
-      <div class="col-6 col-md-3">
+      <div class="col-6 col-md">
         <div class="card stat-card yellow p-3 h-100">
           <div style="font-size:.75rem;color:var(--text3)">注意（4–9週）</div>
           <div class="fw-bold fs-5 text-warning" id="fba-stat-warn">—</div>
         </div>
       </div>
-      <div class="col-6 col-md-3">
+      <div class="col-6 col-md">
         <div class="card stat-card p-3 h-100" style="border-top-color:#C0392B!important">
           <div style="font-size:.75rem;color:var(--text3)">緊急（&lt;4週 或缺貨）</div>
           <div class="fw-bold fs-5 text-danger" id="fba-stat-out">—</div>
+        </div>
+      </div>
+      <div class="col-6 col-md">
+        <div class="card stat-card p-3 h-100" style="border-top-color:#B8761A!important"
+             id="fba-stat-stuck-card" title="不可售 + 調查中">
+          <div style="font-size:.75rem;color:var(--text3)">卡住</div>
+          <div class="fw-bold fs-5" id="fba-stat-stuck">—</div>
+          <div style="font-size:.72rem;color:var(--text3)" id="fba-stat-stuck-sub"></div>
         </div>
       </div>
     </div>
@@ -1999,27 +2006,18 @@ function renderFba() {
     return { name: r['產品名稱'] || r['SKU'] || r['ASIN'] || '',
              qty:  (Number(r['不可售']) || 0) + (Number(r['調查中']) || 0) };
   }).filter(function(x) { return x.qty > 0; });
-  var stuckEl = document.getElementById('fba-stuck-warn');
-  if (stuckEl) {
-    if (!stuckRows.length) {
-      stuckEl.style.display = 'none';
-    } else {
-      var stuckTotal = stuckRows.reduce(function(n, x) { return n + x.qty; }, 0);
-      stuckRows.sort(function(a, b) { return b.qty - a.qty; });
-      stuckEl.style.display = '';
-      stuckEl.innerHTML =
-        '<div class="card p-2 px-3" style="border-left:3px solid var(--warn-text)">'
-        + '<span style="font-size:.8rem"><i class="bi bi-exclamation-triangle me-1" style="color:var(--warn-text)"></i>'
-        + '<span class="fw-semibold">' + stuckRows.length + ' 支產品有卡住的庫存，共 '
-        + stuckTotal.toLocaleString() + ' 件</span>'
-        + '<span class="text-muted">　（不可售 + 調查中，需開移除訂單或申請調查）</span></span>'
-        + '<div class="text-muted" style="font-size:.75rem;margin-top:3px">'
-        + stuckRows.slice(0, 5).map(function(x) {
-            return escHtml(x.name) + ' <span class="fw-semibold">' + x.qty + '</span> 件';
-          }).join('　·　')
-        + (stuckRows.length > 5 ? '　…等 ' + stuckRows.length + ' 支' : '')
-        + '</div></div>';
-    }
+  var stuckTotal = stuckRows.reduce(function(n, x) { return n + x.qty; }, 0);
+  stuckRows.sort(function(a, b) { return b.qty - a.qty; });
+  var stuckCard = document.getElementById('fba-stat-stuck-card');
+  var stuckNum  = document.getElementById('fba-stat-stuck');
+  if (stuckNum) stuckNum.style.color = stuckTotal > 0 ? 'var(--warn-text)' : '';
+  // 哪幾支卡住放在卡片的 title，滑過就看得到，不用再佔一整行版面
+  if (stuckCard) {
+    stuckCard.title = stuckRows.length
+      ? '不可售 + 調查中\n' + stuckRows.slice(0, 8).map(function(x) {
+          return x.name + '　' + x.qty + ' 件';
+        }).join('\n') + (stuckRows.length > 8 ? '\n…等 ' + stuckRows.length + ' 支' : '')
+      : '不可售 + 調查中';
   }
 
   function setEl(id, val) { var el = document.getElementById(id); if (el) el.textContent = val; }
@@ -2028,6 +2026,9 @@ function renderFba() {
   setEl('fba-stat-ok',    total ? ok   : '—');
   setEl('fba-stat-warn',  total ? warn : '—');
   setEl('fba-stat-out',   total ? out  : '—');
+  // 這張的主數字是「件數」，其他四張是「產品數」，所以帶單位避免混淆
+  setEl('fba-stat-stuck',     total ? stuckTotal.toLocaleString() + ' 件' : '—');
+  setEl('fba-stat-stuck-sub', stuckRows.length ? stuckRows.length + ' 支產品' : '');
 
   // 同步時間（GAS trigger 每小時跑一次，超過 3 小時沒更新代表同步掛了）
   var STALE_HOURS       = 3;    // 庫存每小時同步
