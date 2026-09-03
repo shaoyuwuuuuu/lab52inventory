@@ -1281,6 +1281,9 @@ function diagFbaSync() {
               + ' shipped=' + (d.inboundShippedQuantity || 0)
               + ' receiving=' + (d.inboundReceivingQuantity || 0)
               + ' 合計入庫中=' + fbaInboundQty_(d));
+          // 預留：直接印 API 原始物件，不預設欄位名，才看得出實際的拆分方式
+          say('[4 預留] ' + s.asin + ' reservedQuantity=' + JSON.stringify(d.reservedQuantity || {})
+              + '　目前程式採用=' + ((d.reservedQuantity && d.reservedQuantity.totalReservedQuantity) || 0));
         });
       }
     } catch(e) {
