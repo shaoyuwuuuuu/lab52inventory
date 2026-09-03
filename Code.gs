@@ -1465,6 +1465,21 @@ function testSyncAlert() {
   return { ok: true, sentTo: to };
 }
 
+// 寄給「執行這支指令碼的帳號」自己。
+// 用來切開兩種失敗：寄不出去（程式／授權問題）vs 寄出去了但沒送達（收件端過濾）。
+// 寄給自己不經過跨網域投遞，只要這封收得到，就確定程式與授權都沒問題。
+function testSyncAlertToSelf() {
+  var me = Session.getEffectiveUser().getEmail();
+  Logger.log('[自我測試] 寄給執行帳號本人：' + me);
+  GmailApp.sendEmail(me, '[Lab52 庫存] 通知管道自我測試',
+    '這封是寄給指令碼執行帳號自己的。\n'
+    + '收到它 = 程式與 Gmail 授權都正常，問題出在寄到 '
+    + RESTOCK_ALERT_EMAIL + ' 的投遞或過濾。\n'
+    + '收不到它 = 問題在指令碼端。');
+  Logger.log('[自我測試] 已送出，請到 ' + me + ' 的信箱確認');
+  return { ok: true, sentTo: me };
+}
+
 function syncFbaSalesVelocity_() {
   var token  = getSpApiToken_();
   var mktId  = PropertiesService.getScriptProperties().getProperty('AMAZON_MARKETPLACE_ID') || 'ATVPDKIKX0DER';
