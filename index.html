@@ -1973,16 +1973,14 @@ function renderFba() {
   if (hasSales) {
     ok   = rows.filter(function(r){
       var d = Number(r['日均銷量']); if (!d) return false;
-      var q = (r['可出貨數量']||0) + (r['入庫中']||0) + (r['預留數量']||0);
-      return q / (d*7) >= 10;
+      return fbaAvailQty(r) / (d*7) >= 10;
     }).length;
     warn = rows.filter(function(r){
       var d = Number(r['日均銷量']); if (!d) return false;
-      var q = (r['可出貨數量']||0) + (r['入庫中']||0) + (r['預留數量']||0);
-      var w = q/(d*7); return w >= 4 && w < 10;
+      var w = fbaAvailQty(r)/(d*7); return w >= 4 && w < 10;
     }).length;
     out  = rows.filter(function(r){
-      var q = (r['可出貨數量']||0) + (r['入庫中']||0) + (r['預留數量']||0);
+      var q = fbaAvailQty(r);
       if (q <= 0) return true;
       var d = Number(r['日均銷量']); if (!d) return false;
       return q/(d*7) < 4;
@@ -2051,9 +2049,17 @@ function renderFba() {
   makeResizable('fba-table');
 }
 
+// FBA 可用庫存的統一口徑：可出貨 + 入庫中。
+// 不含預留 —— 預留是已被訂單佔用的量，算進來會高估可用庫存、讓補貨建議偏低。
+// 統計磚、狀態 badge、週數欄、後端 writeFbaSheet_ 的狀態都用這個口徑。
+function fbaAvailQty(r) {
+  return (parseFloat(r['可出貨數量']) || 0) + (parseFloat(r['入庫中']) || 0);
+}
+
 function renderFbaCell(ci, rowData) {
   var r = rowData.r, name = rowData.name;
-  var qty = r['可出貨數量'] || 0;
+  var qty = r['可出貨數量'] || 0;   // 僅供「可出貨數量」欄位本身顯示／上色用
+  var avail = fbaAvailQty(r);
   var badge = qty <= 0
     ? '<span class="badge bg-danger">缺貨</span>'
     : (qty < 50 ? '<span class="badge bg-warning">偏低</span>' : '<span class="badge bg-success">正常</span>');
@@ -2071,9 +2077,9 @@ function renderFbaCell(ci, rowData) {
     case 'inbound':  return '<td>' + (r['入庫中']||0) + '</td>';
     case 'reserved': return '<td>' + (r['預留數量']||0) + '</td>';
     case 'status': {
-      if (qty <= 0) return '<td><span class="badge bg-danger">缺貨</span></td>';
+      if (avail <= 0) return '<td><span class="badge bg-danger">缺貨</span></td>';
       var _d = Number(r['日均銷量']);
-      if (_d > 0 && qty / (_d * 7) < 4) return '<td><span class="badge bg-danger">&lt; 4 週</span></td>';
+      if (_d > 0 && avail / (_d * 7) < 4) return '<td><span class="badge bg-danger">&lt; 4 週</span></td>';
       return '<td><span class="text-muted">—</span></td>';
     }
     case 'sales': {
@@ -2082,9 +2088,7 @@ function renderFbaCell(ci, rowData) {
       return '<td><span class="text-muted">' + d + ' 件/天</span></td>';
     }
     case 'weeks': {
-      var qty2 = parseFloat(r['可出貨數量'] || 0)
-               + parseFloat(r['入庫中']    || 0)
-               + parseFloat(r['預留數量']  || 0);
+      var qty2 = avail;
       if (qty2 <= 0) return '<td><span class="badge bg-danger">缺貨</span></td>';
       var daily = r['日均銷量'];
       if (daily === null || daily === undefined || daily === '') return '<td><span class="text-muted">—</span></td>';

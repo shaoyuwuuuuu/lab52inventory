@@ -38,7 +38,17 @@ function doGet(e) {
       if (res && res.error) {
         return jsonOut({ ok: false, error: res.error, fba: fba });  // fba 是舊快取
       }
-      return jsonOut({ ok: true, count: res && res.count, fba: fba });
+      // 0 筆代表 SP-API 回傳的 ASIN 沒有一個對得上 庫存總覽，
+      // 這時 writeFbaSheet_ 會保留舊資料不覆寫 —— 不能報成功，否則會誤以為已更新
+      if (!res || !res.count) {
+        return jsonOut({
+          ok: false,
+          error: '同步完成但 0 筆符合：SP-API 回傳的 ASIN 都不在「庫存總覽」中，表格仍為舊資料，請檢查 ASIN 設定',
+          count: 0,
+          fba: fba
+        });
+      }
+      return jsonOut({ ok: true, count: res.count, fba: fba });
     } catch(err) {
       return jsonOut({ ok: false, error: err.message });
     }
@@ -389,6 +399,11 @@ function addTaiwanEntry(d) {
 
 function replaceTaiwanInventory(rows) {
   try {
+    // 這是「整張覆蓋」，空清單會把台灣倉清光。
+    // 前端已經擋過一次，這裡再擋一次：直接從 GAS 編輯器誤呼叫也不會清空。
+    if (!rows || !rows.length) {
+      return { error: '匯入清單為空，未做任何變更（要清空請直接編輯 TW_Movement 分頁）' };
+    }
     var ss = ss_();
     var sheet = ss.getSheetByName('TW_Movement');
     if (!sheet) {
@@ -1015,6 +1030,20 @@ function fbaInboundQty_(det) {
        + (det.inboundReceivingQuantity || 0);
 }
 
+// FBA 庫存水位判定，與前端 fbaAvailQty / 統計磚同一套口徑：
+//   qty  = 可出貨 + 入庫中（不含預留，預留已被訂單佔用）
+//   有日均銷量就看週數（<4 週缺貨、<10 週注意），沒有就降級用件數門檻 50
+function fbaLevel_(qty, daily) {
+  if (qty <= 0) return 'out';
+  if (daily > 0) {
+    var w = qty / (daily * 7);
+    if (w < 4)  return 'out';
+    if (w < 10) return 'warn';
+    return 'ok';
+  }
+  return qty < 50 ? 'warn' : 'ok';
+}
+
 function writeFbaSheet_(summaries) {
   var ss = ss_();
   var sheet = ss.getSheetByName('FBA庫存');
@@ -1066,17 +1095,20 @@ function writeFbaSheet_(summaries) {
     var fulfillable = det.fulfillableQuantity || 0;
     var inbound     = fbaInboundQty_(det);
     var reserved    = (det.reservedQuantity && det.reservedQuantity.totalReservedQuantity) || 0;
-    var status      = fulfillable <= 0 ? '❌ 缺貨' : (fulfillable < 50 ? '🟡 注意' : '✅ 正常');
-    var ean         = asinToEan[s.asin] || '';
     var saved       = salesByAsin[s.asin] || {};
+    var level       = fbaLevel_(fulfillable + inbound, parseFloat(saved.sales) || 0);
+    var status      = level === 'out' ? '❌ 缺貨' : (level === 'warn' ? '🟡 注意' : '✅ 正常');
+    var ean         = asinToEan[s.asin] || '';
     return [s.sellerSku||'', s.asin||'', ean, s.productName||'', fulfillable, inbound, reserved, now, status,
-            saved.sales !== undefined ? saved.sales : '', saved.date || ''];
+            saved.sales !== undefined ? saved.sales : '', saved.date || '', level];
   });
 
-  sheet.getRange(2,1,rows.length, FBA_HDR_.length).setValues(rows);
+  sheet.getRange(2,1,rows.length, FBA_HDR_.length)
+    .setValues(rows.map(function(r){ return r.slice(0, FBA_HDR_.length); }));
 
   for (var i = 0; i < rows.length; i++) {
-    var bg = rows[i][4] <= 0 ? '#FFCCCC' : (rows[i][4] < 50 ? '#FFF3CC' : null);
+    var lv = rows[i][FBA_HDR_.length];
+    var bg = lv === 'out' ? '#FFCCCC' : (lv === 'warn' ? '#FFF3CC' : null);
     if (bg) sheet.getRange(i+2, 1, 1, FBA_HDR_.length).setBackground(bg);
   }
 }
