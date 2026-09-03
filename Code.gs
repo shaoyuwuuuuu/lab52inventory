@@ -1054,14 +1054,16 @@ function notifySyncFailure_(what, detail) {
 
 var FBA_HDR_ = ['SKU','ASIN','EAN','產品名稱','可出貨數量','入庫中','預留數量','最後更新','狀態','日均銷量','銷量更新日'];
 
-// SP-API InventoryDetails 把「入庫途中」拆成三段，只取 shipped 會少算頭尾兩段：
-//   inboundWorkingQuantity   已建立入庫計畫、還沒給追蹤號
-//   inboundShippedQuantity   已出貨在途
-//   inboundReceivingQuantity 已到倉、收貨處理中
+// SP-API 的 InboundQuantityBreakdown 有三段，但賣家後台的「入庫」欄只算前兩段：
+//   inboundWorkingQuantity   已建立入庫計畫、還沒出貨      → 算入庫
+//   inboundShippedQuantity   已出貨在途                    → 算入庫
+//   inboundReceivingQuantity 已到倉、正在點收              → 後台不算入庫
+// receiving 的貨已經在 Amazon 手上、不是在途，把它加進來會比後台多出一截
+// （實例：B0DBTNJW4G working=0 shipped=0 receiving=34，後台顯示入庫 0）。
+// 原本的程式只取 shipped，漏掉 working；這裡補上 working 但排除 receiving。
 function fbaInboundQty_(det) {
-  return (det.inboundWorkingQuantity   || 0)
-       + (det.inboundShippedQuantity   || 0)
-       + (det.inboundReceivingQuantity || 0);
+  return (det.inboundWorkingQuantity || 0)
+       + (det.inboundShippedQuantity || 0);
 }
 
 // FBA 庫存水位判定，與前端 fbaAvailQty / 統計磚同一套口徑：
