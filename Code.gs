@@ -1406,7 +1406,7 @@ function setupSalesTrigger() {
 //   2. 執行 sendRestockAlert() 可立即手動測試
 //   3. 執行 removeRestockAlertTrigger() 可取消定時發信
 
-var RESTOCK_ALERT_EMAIL   = 'shaoyu427@gmail.com';
+var RESTOCK_ALERT_EMAIL   = 'annicewu@toothfilm.com';
 var RESTOCK_TARGET_DAYS   = 90;   // 低於此天數才發警示
 var RESTOCK_URGENT_DAYS   = 28;   // 低於此天數標記為緊急
 
