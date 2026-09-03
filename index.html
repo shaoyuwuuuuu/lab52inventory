@@ -177,7 +177,7 @@ tr:hover .prod-actions{opacity:1}
 .stat-card.purple{border-top-color:#6B5ECD!important}
 
 /* ── Stock breakdown tooltip (JS-driven, see #stock-tip) ─ */
-[data-stk]{cursor:help;text-decoration:underline dotted;text-underline-offset:3px}
+[data-stk],[data-fbatip]{cursor:help;text-decoration:underline dotted;text-underline-offset:3px}
 
 /* ── Column resize ───────────────────────────────────── */
 .col-rz{position:absolute;right:-4px;top:0;width:8px;height:100%;cursor:col-resize;user-select:none;z-index:20;touch-action:none}
@@ -455,6 +455,8 @@ tr:hover .prod-actions{opacity:1}
       <div class="page-title mb-0"><i class="bi bi-box-seam me-2"></i>FBA庫存</div>
       <span id="fba-sync-time" class="text-muted" style="font-size:.78rem;"></span>
     </div>
+    <!-- 卡住庫存警示：不可售 + 調查中，賣不出去且需要人為處理 -->
+    <div id="fba-stuck-warn" class="mb-3" style="display:none"></div>
     <div class="row g-3 mb-3">
       <div class="col-6 col-md-3">
         <div class="card stat-card blue p-3 h-100">
@@ -1991,6 +1993,35 @@ function renderFba() {
     out  = rows.filter(function(r){ return (r['可出貨數量']||0) <= 0; }).length;
   }
 
+  // 卡住的庫存（不可售 + 調查中）。這些不影響補貨算式（本來就不在可出貨裡），
+  // 但是實際躺著賣不掉的錢，埋在表格某一列裡不會有人注意到，所以拉到最上面。
+  var stuckRows = rows.map(function(r) {
+    return { name: r['產品名稱'] || r['SKU'] || r['ASIN'] || '',
+             qty:  (Number(r['不可售']) || 0) + (Number(r['調查中']) || 0) };
+  }).filter(function(x) { return x.qty > 0; });
+  var stuckEl = document.getElementById('fba-stuck-warn');
+  if (stuckEl) {
+    if (!stuckRows.length) {
+      stuckEl.style.display = 'none';
+    } else {
+      var stuckTotal = stuckRows.reduce(function(n, x) { return n + x.qty; }, 0);
+      stuckRows.sort(function(a, b) { return b.qty - a.qty; });
+      stuckEl.style.display = '';
+      stuckEl.innerHTML =
+        '<div class="card p-2 px-3" style="border-left:3px solid var(--warn-text)">'
+        + '<span style="font-size:.8rem"><i class="bi bi-exclamation-triangle me-1" style="color:var(--warn-text)"></i>'
+        + '<span class="fw-semibold">' + stuckRows.length + ' 支產品有卡住的庫存，共 '
+        + stuckTotal.toLocaleString() + ' 件</span>'
+        + '<span class="text-muted">　（不可售 + 調查中，需開移除訂單或申請調查）</span></span>'
+        + '<div class="text-muted" style="font-size:.75rem;margin-top:3px">'
+        + stuckRows.slice(0, 5).map(function(x) {
+            return escHtml(x.name) + ' <span class="fw-semibold">' + x.qty + '</span> 件';
+          }).join('　·　')
+        + (stuckRows.length > 5 ? '　…等 ' + stuckRows.length + ' 支' : '')
+        + '</div></div>';
+    }
+  }
+
   function setEl(id, val) { var el = document.getElementById(id); if (el) el.textContent = val; }
   setEl('fba-stat-total', total || '—');
   setEl('fba-stat-total-units', total ? '共 ' + totalUnits.toLocaleString() + ' 件' : '');
@@ -2082,7 +2113,22 @@ function renderFbaCell(ci, rowData) {
       ? '<span style="color:var(--warn-text);" class="fw-semibold">' + qty + '</span>'
       : '<span style="color:var(--ok-text);" class="fw-semibold">'  + qty + '</span>');
   switch (FBA_COLS[ci].id) {
-    case 'name':     return '<td><span class="fw-semibold">' + escHtml(name) + '</span></td>';
+    // 完整拆分掛在產品名稱上，hover 會跳出跟賣家後台同樣排列的明細面板
+    case 'name':     return '<td><span class="fw-semibold" data-fbatip="1"'
+                       + ' data-avail="' + (Number(r['可出貨數量']) || 0) + '"'
+                       + ' data-trans="' + (Number(r['轉運'])       || 0) + '"'
+                       + ' data-inb="'   + (Number(r['入庫中'])     || 0) + '"'
+                       + ' data-cust="'  + (Number(r['買家訂單'])   || 0) + '"'
+                       + ' data-fcp="'   + (Number(r['FC處理中'])   || 0) + '"'
+                       + ' data-unf="'   + (Number(r['不可售'])     || 0) + '"'
+                       + ' data-res="'   + (Number(r['調查中'])     || 0) + '"'
+                       + '>' + escHtml(name) + '</span></td>';
+    case 'stuck': {
+      var stuck = (Number(r['不可售']) || 0) + (Number(r['調查中']) || 0);
+      return stuck > 0
+        ? '<td><span style="color:var(--warn-text);font-weight:600">⚠ ' + stuck + '</span></td>'
+        : '<td><span class="text-muted">—</span></td>';
+    }
     case 'sku':      return '<td><span class="text-muted">' + escHtml(r['SKU']||'—') + '</span></td>';
     case 'asin':     return '<td><span class="text-muted small">' + escHtml(r['ASIN']||'—') + '</span></td>';
     case 'ean':      return '<td><span style="font-family:monospace;color:var(--text2);">' + escHtml(r['EAN']||'—') + '</span></td>';
@@ -2802,6 +2848,7 @@ var FBA_COLS = [
   {id:'qty',      label:'可出貨'},
   {id:'inbound',  label:'入庫中'},
   {id:'reserved', label:'預留'},
+  {id:'stuck',    label:'卡住', tooltip:'不可售 + 調查中。這些庫存賣不出去，需要開移除訂單或申請調查'},
   {id:'weeks',    label:'庫存週數'},
   {id:'sales',    label:'日均銷量', tooltip:'過去 7 天總出單 ÷ 7，每天早上 7 點自動更新'}
 ];
@@ -3205,10 +3252,37 @@ function saveGasUrl() {
 (function(){
   var tip = document.getElementById('stock-tip');
   document.addEventListener('mouseover', function(e) {
-    var el = e.target.closest('[data-stk],[data-ptip-total]');
+    var el = e.target.closest('[data-stk],[data-ptip-total],[data-fbatip]');
     if (!el) { tip.style.display='none'; return; }
 
-    if (el.hasAttribute('data-stk')) {
+    if (el.hasAttribute('data-fbatip')) {
+      // FBA 庫存明細 — 欄位順序刻意比照賣家後台，方便逐項對帳
+      function _n(a) { return parseInt(el.getAttribute(a) || 0) || 0; }
+      var avail = _n('data-avail'), trans = _n('data-trans'), inb = _n('data-inb'),
+          cust  = _n('data-cust'),  fcp   = _n('data-fcp'),
+          unf   = _n('data-unf'),   res   = _n('data-res');
+      var grand = avail + trans + inb + cust + fcp + unf + res;
+      function _row(label, val, color) {
+        return '<span style="color:' + (color || '#7eb3ff') + ';font-size:.88em">' + label + '</span>'
+             + '<span style="text-align:right;font-weight:600">' + val.toLocaleString() + '</span>';
+      }
+      tip.innerHTML =
+        '<div style="font-weight:700;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.15);letter-spacing:.05em;font-size:.72rem;color:#9ca3c8">FBA 庫存明細</div>'
+        + '<div style="display:grid;grid-template-columns:auto 1fr;gap:5px 14px;align-items:center">'
+        + _row('可售',        avail)
+        + _row('運營中心轉運', trans)
+        + _row('入庫中',      inb)
+        + _row('預留 · 買家訂單', cust, '#a5d6a7')
+        + _row('預留 · FC 處理中', fcp,  '#a5d6a7')
+        + _row('不可售',      unf, '#f0a5a5')
+        + _row('調查中',      res, '#f0a5a5')
+        + '</div>'
+        + '<div style="margin-top:7px;padding-top:6px;border-top:1px solid rgba(255,255,255,.15);'
+        + 'display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center">'
+        + '<span style="font-size:.88em;color:#9ca3c8">總計</span>'
+        + '<span style="text-align:right;font-weight:700">' + grand.toLocaleString() + '</span>'
+        + '</div>';
+    } else if (el.hasAttribute('data-stk')) {
       // 庫存明細 (總數量欄)
       var fba = parseInt(el.getAttribute('data-fba')||0).toLocaleString();
       var ov  = parseInt(el.getAttribute('data-ov') ||0).toLocaleString();
@@ -3250,14 +3324,16 @@ function saveGasUrl() {
   });
   document.addEventListener('mousemove', function(e) {
     if (tip.style.display==='none') return;
+    // 用實際尺寸而不是寫死的 190/120 —— FBA 明細面板有 9 列，寫死會超出畫面底部
+    var w = tip.offsetWidth || 190, h = tip.offsetHeight || 120;
     var x = e.clientX + 14, y = e.clientY + 14;
-    if (x + 190 > window.innerWidth)  x = e.clientX - 190;
-    if (y + 120 > window.innerHeight) y = e.clientY - 120;
+    if (x + w > window.innerWidth)  x = e.clientX - w - 14;
+    if (y + h > window.innerHeight) y = e.clientY - h - 14;
     tip.style.left = x + 'px';
     tip.style.top  = y + 'px';
   });
   document.addEventListener('mouseout', function(e) {
-    if (e.target.closest('[data-stk]')) tip.style.display='none';
+    if (e.target.closest('[data-stk],[data-fbatip]')) tip.style.display='none';
   });
 })();
 </script>

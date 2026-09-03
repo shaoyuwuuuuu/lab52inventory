@@ -1052,7 +1052,24 @@ function notifySyncFailure_(what, detail) {
   }
 }
 
-var FBA_HDR_ = ['SKU','ASIN','EAN','產品名稱','可出貨數量','入庫中','預留數量','最後更新','狀態','日均銷量','銷量更新日'];
+// 前 11 欄是原本就有的，新欄位一律加在最後面 —— 保留日均銷量的邏輯是按欄位「名稱」
+// 查找的，所以尾端擴充不會影響既有資料。
+var FBA_HDR_ = ['SKU','ASIN','EAN','產品名稱','可出貨數量','入庫中','預留數量','最後更新','狀態','日均銷量','銷量更新日',
+                '不可售','調查中','買家訂單','FC處理中','轉運'];
+
+// unfulfillable / researching 在 API 裡是巢狀物件，但實際欄位名還沒用真實資料驗證過
+// （入庫和預留都吃過「照文件推論」的虧）。所以這裡不寫死 key：
+// 是數字就直接用；是物件就先找 total* 開頭的欄位，找不到才加總所有數值欄位。
+function fbaTotalOf_(v) {
+  if (v == null) return 0;
+  if (typeof v === 'number') return v;
+  if (typeof v !== 'object') return 0;
+  var k;
+  for (k in v) if (/^total/i.test(k) && typeof v[k] === 'number') return v[k];
+  var sum = 0, found = false;
+  for (k in v) if (typeof v[k] === 'number') { sum += v[k]; found = true; }
+  return found ? sum : 0;
+}
 
 // SP-API 的 InboundQuantityBreakdown 有三段，但賣家後台的「入庫」欄只算前兩段：
 //   inboundWorkingQuantity   已建立入庫計畫、還沒出貨      → 算入庫
@@ -1108,6 +1125,11 @@ function writeFbaSheet_(summaries) {
     return;
   }
 
+  // 欄位擴充過（11 → 16），分頁欄數不夠就先長大，否則下面的 getRange 會 out of bounds
+  if (sheet.getMaxColumns() < FBA_HDR_.length) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), FBA_HDR_.length - sheet.getMaxColumns());
+  }
+
   // 保留現有銷量資料（按 ASIN 鍵值）
   var salesByAsin = {};
   if (sheet.getLastRow() > 1) {
@@ -1146,8 +1168,15 @@ function writeFbaSheet_(summaries) {
     var level       = fbaLevel_(fulfillable + inbound, parseFloat(saved.sales) || 0);
     var status      = level === 'out' ? '❌ 缺貨' : (level === 'warn' ? '🟡 注意' : '✅ 正常');
     var ean         = asinToEan[s.asin] || '';
+    var rq          = det.reservedQuantity || {};
     return [s.sellerSku||'', s.asin||'', ean, s.productName||'', fulfillable, inbound, reserved, now, status,
-            saved.sales !== undefined ? saved.sales : '', saved.date || '', level];
+            saved.sales !== undefined ? saved.sales : '', saved.date || '',
+            fbaTotalOf_(det.unfulfillableQuantity),        // 不可售（殘損、瑕疵…）
+            fbaTotalOf_(det.researchingQuantity),          // 調查中
+            Number(rq.pendingCustomerOrderQuantity) || 0,  // 預留 · 買家訂單
+            Number(rq.fcProcessingQuantity)         || 0,  // 預留 · 運營中心處理中
+            Number(rq.pendingTransshipmentQuantity) || 0,  // 運營中心轉運（後台歸在現貨）
+            level];
   });
 
   sheet.getRange(2,1,rows.length, FBA_HDR_.length)
