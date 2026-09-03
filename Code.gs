@@ -1066,6 +1066,17 @@ function fbaInboundQty_(det) {
        + (det.inboundShippedQuantity || 0);
 }
 
+// 賣家後台的「預留」只算 買家訂單 + 運營中心處理中。
+// pendingTransshipmentQuantity（運營中心轉運）後台是歸在「現貨」底下的，不算預留
+// —— 後台顯示「現貨 765 = 可售 764 + 運營中心轉運 1」。
+// 實例 B0DBTNJW4G：API total=60（49 + 轉運 1 + FC處理 10），後台預留顯示 59。
+// 用 total 扣掉轉運而不是把兩段相加，是為了讓 Amazon 日後新增的預留類別也能被算進來。
+function fbaReservedQty_(det) {
+  var rq = det.reservedQuantity || {};
+  return Math.max(0, (Number(rq.totalReservedQuantity)        || 0)
+                   - (Number(rq.pendingTransshipmentQuantity) || 0));
+}
+
 // FBA 庫存水位判定，與前端 fbaAvailQty / 統計磚同一套口徑：
 //   qty  = 可出貨 + 入庫中（不含預留，預留已被訂單佔用）
 //   有日均銷量就看週數（<4 週缺貨、<10 週注意），沒有就降級用件數門檻 50
@@ -1130,7 +1141,7 @@ function writeFbaSheet_(summaries) {
     var det = s.inventoryDetails || {};
     var fulfillable = det.fulfillableQuantity || 0;
     var inbound     = fbaInboundQty_(det);
-    var reserved    = (det.reservedQuantity && det.reservedQuantity.totalReservedQuantity) || 0;
+    var reserved    = fbaReservedQty_(det);
     var saved       = salesByAsin[s.asin] || {};
     var level       = fbaLevel_(fulfillable + inbound, parseFloat(saved.sales) || 0);
     var status      = level === 'out' ? '❌ 缺貨' : (level === 'warn' ? '🟡 注意' : '✅ 正常');
@@ -1286,7 +1297,7 @@ function diagFbaSync() {
               + '(w' + (d.inboundWorkingQuantity   || 0)
               + '/s' + (d.inboundShippedQuantity   || 0)
               + '/r' + (d.inboundReceivingQuantity || 0) + ')'
-              + ' 預留=' + ((d.reservedQuantity && d.reservedQuantity.totalReservedQuantity) || 0)
+              + ' 預留=' + fbaReservedQty_(d)
               + ' ┃ 分頁 可出貨=' + (row['可出貨數量'] || 0)
               + ' 入庫中=' + (row['入庫中'] || 0)
               + ' 預留=' + (row['預留數量'] || 0));
