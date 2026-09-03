@@ -1273,17 +1273,31 @@ function diagFbaSync() {
           say('[4 SP-API] 庫存總覽前 3 個 ASIN：' + tracked.slice(0,3).join(', '));
         }
         // 入庫中三段各自的數字，用來確認 fbaInboundQty_ 的修正是否吃到資料
-        hit.slice(0, 3).forEach(function(s) {
-          var d = s.inventoryDetails || {};
-          say('[4 入庫中] ' + s.asin
-              + ' 可出貨=' + (d.fulfillableQuantity || 0)
-              + ' working=' + (d.inboundWorkingQuantity || 0)
-              + ' shipped=' + (d.inboundShippedQuantity || 0)
-              + ' receiving=' + (d.inboundReceivingQuantity || 0)
-              + ' 合計入庫中=' + fbaInboundQty_(d));
-          // 預留：直接印 API 原始物件，不預設欄位名，才看得出實際的拆分方式
-          say('[4 預留] ' + s.asin + ' reservedQuantity=' + JSON.stringify(d.reservedQuantity || {})
-              + '　目前程式採用=' + ((d.reservedQuantity && d.reservedQuantity.totalReservedQuantity) || 0));
+        // API 現值 vs 分頁現值逐支對照。兩邊一致 → 分頁是新的，差異來自欄位口徑；
+        // 兩邊不一致 → 分頁還沒重新同步，先跑 syncFbaInventory 再談。
+        var sheetByAsin = {};
+        readFbaInventory_().forEach(function(r) { if (r['ASIN']) sheetByAsin[r['ASIN']] = r; });
+        hit.forEach(function(s) {
+          var d   = s.inventoryDetails || {};
+          var row = sheetByAsin[s.asin] || {};
+          say('[4 對照] ' + s.asin
+              + ' ┃ API 可出貨=' + (d.fulfillableQuantity || 0)
+              + ' 入庫中=' + fbaInboundQty_(d)
+              + '(w' + (d.inboundWorkingQuantity   || 0)
+              + '/s' + (d.inboundShippedQuantity   || 0)
+              + '/r' + (d.inboundReceivingQuantity || 0) + ')'
+              + ' 預留=' + ((d.reservedQuantity && d.reservedQuantity.totalReservedQuantity) || 0)
+              + ' ┃ 分頁 可出貨=' + (row['可出貨數量'] || 0)
+              + ' 入庫中=' + (row['入庫中'] || 0)
+              + ' 預留=' + (row['預留數量'] || 0));
+        });
+        // 預留的完整拆分：印原始物件，不預設欄位名，才看得出 Amazon 實際怎麼拆
+        hit.filter(function(s) {
+          var rq = (s.inventoryDetails || {}).reservedQuantity;
+          return rq && Number(rq.totalReservedQuantity) > 0;
+        }).slice(0, 5).forEach(function(s) {
+          say('[4 預留明細] ' + s.asin + ' '
+              + JSON.stringify(s.inventoryDetails.reservedQuantity));
         });
       }
     } catch(e) {
