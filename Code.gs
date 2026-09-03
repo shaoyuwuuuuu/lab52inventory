@@ -1302,6 +1302,23 @@ function diagFbaSync() {
               + ' 入庫中=' + (row['入庫中'] || 0)
               + ' 預留=' + (row['預留數量'] || 0));
         });
+        // 同一個 ASIN 可能有多個 SKU，API 會回多筆。後台的商品詳情面板是看單一
+        // listing 的，兩邊數字自然對不起來（面板顯示某個 SKU，我們顯示的是另一筆）。
+        var byAsin = {};
+        hit.forEach(function(s) { (byAsin[s.asin] = byAsin[s.asin] || []).push(s); });
+        Object.keys(byAsin).filter(function(a) { return byAsin[a].length > 1; })
+          .forEach(function(a) {
+            var list = byAsin[a];
+            say('[4 重複] ★ ' + a + ' 有 ' + list.length + ' 個 SKU：'
+                + list.map(function(s) {
+                    return (s.sellerSku || '?') + ' 可出貨='
+                         + ((s.inventoryDetails || {}).fulfillableQuantity || 0);
+                  }).join('　')
+                + '　合計=' + list.reduce(function(n, s) {
+                    return n + ((s.inventoryDetails || {}).fulfillableQuantity || 0);
+                  }, 0) + ' ★');
+          });
+
         // 預留的完整拆分：印原始物件，不預設欄位名，才看得出 Amazon 實際怎麼拆
         hit.filter(function(s) {
           var rq = (s.inventoryDetails || {}).reservedQuantity;
