@@ -1258,6 +1258,13 @@ function diagFbaSync() {
         var hit = sums.filter(function(s){ return tracked.indexOf(s.asin) >= 0; });
         say('[4 SP-API] Amazon 回傳 ' + sums.length + ' 筆；庫存總覽有 ' + tracked.length
             + ' 個 ASIN，對得上 ' + hit.length + ' 筆');
+        // 對不上的個別列出來：這些產品永遠不會出現在 FBA庫存，很容易被忽略
+        var amzAsins = sums.map(function(s){ return s.asin; });
+        var missing  = tracked.filter(function(a){ return amzAsins.indexOf(a) < 0; });
+        if (missing.length) {
+          say('[4 SP-API] ★ ' + missing.length + ' 個 ASIN 在「庫存總覽」但 Amazon 沒回傳，'
+              + '不會出現在 FBA庫存：' + missing.join(', ') + ' ★');
+        }
         if (sums.length && !hit.length) {
           say('[4 SP-API] ★ 一筆都對不上，同步會保留舊資料不覆寫 ★');
           say('[4 SP-API] Amazon 前 3 個 ASIN：' + sums.slice(0,3).map(function(s){ return s.asin; }).join(', '));
