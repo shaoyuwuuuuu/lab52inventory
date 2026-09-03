@@ -1395,11 +1395,46 @@ function setupFbaTrigger() {
 // （繼續讓 Google 記錄成失敗，trigger 失敗摘要才看得到）。
 function syncFbaSalesVelocity() {
   try {
-    return syncFbaSalesVelocity_();
+    var r = syncFbaSalesVelocity_();
+    checkInventoryFreshness_();   // 每天順便當一次看門狗
+    return r;
   } catch(e) {
     notifySyncFailure_('FBA 銷量同步', e.message);
     throw e;
   }
+}
+
+// 看門狗：庫存同步是獨立的每小時 trigger，萬一那個 trigger 被刪掉或停用，
+// 它自己不會發出任何聲音（沒執行 = 沒有錯誤 = 沒有通知）。
+// 2026-08-18 停擺 16 天沒人發現就是這個死角，所以由每天的銷量同步順便檢查一次。
+function checkInventoryFreshness_() {
+  try {
+    var rows = readFbaInventory_();
+    if (!rows.length) return;
+    var last = rows[0]['最後更新'];
+    if (!last) return;
+    var t = new Date(String(last).replace(' ', 'T'));
+    if (isNaN(t.getTime())) return;
+    var hrs = (new Date().getTime() - t.getTime()) / 3600000;
+    if (hrs >= 6) {
+      notifySyncFailure_('FBA 庫存同步停擺',
+        '庫存最後更新於 ' + last + '，已經 ' + Math.floor(hrs) + ' 小時沒有更新。\n'
+        + '每小時的 syncFbaInventory trigger 可能被刪除或停用。\n'
+        + '請執行 diagFbaSync() 檢查，第 2 段會列出目前存在的 trigger。');
+    }
+  } catch(e) {
+    Logger.log('checkInventoryFreshness_ 失敗：' + e.message);
+  }
+}
+
+// 一鍵驗證通知管道真的通。沒測過的告警等於沒有告警。
+// 執行後應該會在 RESTOCK_ALERT_EMAIL 收到一封信。
+function testSyncAlert() {
+  var what = '通知管道測試';
+  PropertiesService.getScriptProperties().deleteProperty('SYNC_ALERT_' + what);  // 跳過 6 小時節流
+  notifySyncFailure_(what, '這是一封測試信。收到它，就代表 FBA 同步出問題時你會被通知。');
+  Logger.log('測試信已送出至 ' + RESTOCK_ALERT_EMAIL + '，請檢查收件匣（含垃圾郵件）。');
+  return { ok: true, sentTo: RESTOCK_ALERT_EMAIL };
 }
 
 function syncFbaSalesVelocity_() {
