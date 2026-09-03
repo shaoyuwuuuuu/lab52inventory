@@ -1190,6 +1190,14 @@ function diagFbaSync() {
       say('[1 設定] ' + k + ' → 已設定（長度 ' + String(v).length + '）'
           + (t.length !== String(v).length
               ? '　★ 含前後空白／換行，實際內容長度 ' + t.length + ' ★' : ''));
+      // 識別碼和密碼很容易貼反：client ID 一定是 amzn1.application-oa2-client. 開頭
+      var isId = t.indexOf('amzn1.application-oa2-client.') === 0;
+      if (k === 'AMAZON_CLIENT_ID' && !isId) {
+        say('[1 設定] ★ CLIENT_ID 不是 amzn1.application-oa2-client. 開頭，可能貼錯欄位 ★');
+      }
+      if (k === 'AMAZON_CLIENT_SECRET' && isId) {
+        say('[1 設定] ★ CLIENT_SECRET 填的是「用戶端識別碼」，兩個欄位貼反了 ★');
+      }
     });
 
   // 2. Trigger 還在不在
