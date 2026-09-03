@@ -1142,9 +1142,11 @@ function renderDashboard() {
   });
 
   // Overseas (AMZLGS) net stock in boxes
+  // Movement 可能混有 location=TW 的列，那些已經算在 twBoxByEan 裡，要排除避免重複計算
   var overseasBoxByEan = {};
   (S.movements || []).forEach(function(m) {
     var ean = m.ean || ''; if (!ean) return;
+    if ((m.location || 'AMZLGS').toUpperCase() === 'TW') return;
     overseasBoxByEan[ean] = (overseasBoxByEan[ean] || 0) + (parseFloat(m.boxes) || 0);
   });
 
@@ -2296,7 +2298,22 @@ function updateTwBox(idx, qpc) {
   el.textContent = qpc > 0 ? (Math.round(pcs / qpc * 10) / 10).toFixed(1) + ' 箱' : pcs + ' pcs';
 }
 
+// 把使用者在預覽表格 input 裡改的值寫回 _twImportRows。
+// 重新 render（刪列）或送出前都要先呼叫，否則 render 會用舊資料把編輯蓋掉。
+function syncTwPreviewEdits() {
+  _twImportRows = _twImportRows.map(function(r, i) {
+    var pcsEl = document.getElementById('tw-pcs-' + i);
+    var expEl = document.getElementById('tw-exp-' + i);
+    if (!pcsEl && !expEl) return r;
+    var pcs   = pcsEl ? (parseInt(pcsEl.value) || r.pcs) : r.pcs;
+    var exp   = expEl ? expEl.value.trim() : (r.exp || '');
+    var boxes = r.qpc > 0 ? Math.round(pcs / r.qpc * 10) / 10 : pcs;
+    return Object.assign({}, r, { pcs: pcs, boxes: boxes, exp: exp || null });
+  });
+}
+
 function deleteTwPreviewRow(idx) {
+  syncTwPreviewEdits();   // 先收好其他列的編輯，再刪
   _twImportRows.splice(idx, 1);
   if (!_twImportRows.length) {
     document.getElementById('tw-import-preview').style.display = 'none';
@@ -2310,15 +2327,7 @@ function confirmTaiwanImport() {
   if (btn && btn.disabled) return;
   if (!_twImportRows.length) return;
   if (!GAS_MODE) { showToast('本機模式無法寫入，請部署到 GAS 後操作', 'error'); return; }
-  // 讀回使用者在預覽表格中修改的值
-  _twImportRows = _twImportRows.map(function(r, i) {
-    var pcsEl = document.getElementById('tw-pcs-' + i);
-    var expEl = document.getElementById('tw-exp-' + i);
-    var pcs   = pcsEl ? (parseInt(pcsEl.value) || r.pcs) : r.pcs;
-    var exp   = expEl ? expEl.value.trim() : (r.exp || '');
-    var boxes = r.qpc > 0 ? Math.round(pcs / r.qpc * 10) / 10 : pcs;
-    return Object.assign({}, r, { pcs: pcs, boxes: boxes, exp: exp || null });
-  });
+  syncTwPreviewEdits();   // 讀回使用者在預覽表格中修改的值
   var today = new Date().toISOString().slice(0,10);
   var payload = _twImportRows.map(function(r) {
     var p = S.products.find(function(x){ return x.ean === r.ean; }) || {};

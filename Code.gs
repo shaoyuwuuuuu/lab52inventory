@@ -1221,8 +1221,10 @@ function sendRestockAlert() {
   });
 
   // 海外倉庫存
+  // Movement 可能混有 location=TW 的列，那些已經算在 twBoxByEan 裡，要排除避免重複計算
   var overseasBoxByEan = {};
   readMovements_().forEach(function(m) {
+    if (String(m.location || 'AMZLGS').toUpperCase() === 'TW') return;
     overseasBoxByEan[m.ean] = (overseasBoxByEan[m.ean] || 0) + (parseFloat(m.boxes) || 0);
   });
 
