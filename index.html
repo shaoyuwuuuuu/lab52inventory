@@ -2343,7 +2343,7 @@ function undoTaiwanImport() {
   if (!confirm('確定要還原上一次台灣倉匯入的資料嗎？')) return;
   gasCall('restoreTaiwanBackup', null, function(res) {
     if (res && res.ok) {
-      showToast('已還原，共 ' + (res.count || 0) + ' 筆', 'success');
+      showToast('已還原 ' + (res.count || 0) + ' 筆' + (res.at ? '（備份於 ' + res.at + '）' : ''), 'success');
       syncData();
     } else {
       showToast('還原失敗：' + (res && res.error || '沒有備份'), 'error');

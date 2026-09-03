@@ -427,23 +427,45 @@ function replaceTaiwanInventory(rows) {
   } catch(e) { return { error: e.message }; }
 }
 
+var TW_BACKUP_SHEET_ = 'TW_Backup';
+
+// 備份寫進隱藏分頁而不是 ScriptProperties：單一屬性上限只有 9KB，
+// 台灣倉大約 40~50 列就會塞爆，之後每次匯入都會失敗。
+// 走分頁還有一個好處：日期欄位維持 Date 物件，不會被 JSON 轉成字串。
 function backupTaiwanSheet_(ss, sheet) {
   var data = sheet.getDataRange().getValues();
-  PropertiesService.getScriptProperties().setProperty('TW_BACKUP', JSON.stringify(data));
+  if (!data.length) return;
+  var bk = ss.getSheetByName(TW_BACKUP_SHEET_);
+  if (!bk) {
+    bk = ss.insertSheet(TW_BACKUP_SHEET_);
+    bk.hideSheet();
+  }
+  bk.clear();
+  // 新分頁預設 1000 列 / 26 欄，資料超過就得先長大，否則 setValues 會 out of bounds
+  if (bk.getMaxRows()    < data.length)    bk.insertRowsAfter(bk.getMaxRows(), data.length - bk.getMaxRows());
+  if (bk.getMaxColumns() < data[0].length) bk.insertColumnsAfter(bk.getMaxColumns(), data[0].length - bk.getMaxColumns());
+  bk.getRange(1, 1, data.length, data[0].length).setValues(data);
+  PropertiesService.getScriptProperties().setProperty('TW_BACKUP_AT',
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'));
 }
 
 function restoreTaiwanBackup() {
   try {
-    var raw = PropertiesService.getScriptProperties().getProperty('TW_BACKUP');
-    if (!raw) return { error: '沒有可還原的備份' };
-    var backupData = JSON.parse(raw);
-    if (!backupData || backupData.length === 0) return { error: '備份資料為空' };
     var ss = ss_();
+    var bk = ss.getSheetByName(TW_BACKUP_SHEET_);
+    if (!bk || bk.getLastRow() === 0) return { error: '沒有可還原的備份' };
+    var backupData = bk.getDataRange().getValues();
+    if (backupData.length < 2) return { error: '備份資料為空' };
+
     var sheet = ss.getSheetByName('TW_Movement');
     if (!sheet) sheet = ss.insertSheet('TW_Movement');
     sheet.clearContents();
     sheet.getRange(1, 1, backupData.length, backupData[0].length).setValues(backupData);
-    return { ok: true, count: backupData.length - 1 };
+    return {
+      ok: true,
+      count: backupData.length - 1,
+      at: PropertiesService.getScriptProperties().getProperty('TW_BACKUP_AT') || ''
+    };
   } catch(e) { return { error: e.message }; }
 }
 
