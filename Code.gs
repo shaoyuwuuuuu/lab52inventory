@@ -1655,14 +1655,6 @@ function sendRestockAlert() {
   var fbaByAsin = {};
   fbaRows.forEach(function(r) { if (r['ASIN']) fbaByAsin[r['ASIN']] = r; });
 
-  // 在途（非台灣方向）的箱數
-  var transitBoxByEan = {};
-  transits.filter(function(t) {
-    return t.status === 'TRANSIT' && (t.to_location || '').toUpperCase() !== 'TW';
-  }).forEach(function(t) {
-    transitBoxByEan[t.ean] = (transitBoxByEan[t.ean] || 0) + (parseFloat(t.qty_cartons) || 0);
-  });
-
   // 台灣倉庫存
   var twBoxByEan = {};
   readTaiwanMovements_().forEach(function(m) {
@@ -1684,9 +1676,12 @@ function sendRestockAlert() {
     var daily = Number(fba['日均銷量'] || 0); if (!daily) return;
     var qpc   = parseFloat(p.qty_per_carton) || 1;
 
-    var fbaQty      = parseFloat(fba['可出貨數量'] || 0);
-    var transitQty  = (transitBoxByEan[p.ean] || 0) * qpc;
-    var effectiveQty = fbaQty + transitQty;
+    // 與前端補貨建議同口徑：只看 FBA 自己的量（可出貨 + 入庫中，不含預留）。
+    // 原本加的在途是往「海外倉」的貨，那批到不了 FBA，不該降低 FBA 的補貨需求；
+    // 真正要進 FBA 的貨 Amazon 已經算在「入庫中」，再加一次會重複。
+    // 貨從哪裡出由下方的 source 欄位判斷，跟「FBA 還缺多少」是兩件事。
+    var fbaQty       = parseFloat(fba['可出貨數量'] || 0);
+    var effectiveQty = fbaQty + parseFloat(fba['入庫中'] || 0);
     var days = Math.round(effectiveQty / daily);
     if (days >= RESTOCK_TARGET_DAYS) return;
 

@@ -281,6 +281,13 @@ tr:hover .prod-actions{opacity:1}
         <span class="fw-bold" style="font-size:.88rem;color:var(--text2);white-space:nowrap"><i class="bi bi-truck me-1" style="color:#1E7BC4"></i>手動在途（TW → FBA / 外倉）</span>
         <span class="text-muted" style="font-size:.75rem;white-space:nowrap">輸入已從台灣倉出發、尚未到貨的箱數</span>
       </div>
+      <!-- 這欄只是顯示用的減項，不會寫任何異動紀錄；正式出貨請改用在途貨物追蹤 -->
+      <div class="px-3 pb-2">
+        <span class="text-muted" style="font-size:.72rem;line-height:1.5">
+          <i class="bi bi-info-circle me-1"></i>此欄<strong>不會自動記帳</strong>：到貨時要自己扣台灣倉、加海外倉，再把這裡歸零。
+          正式出貨請用「<strong>在途貨物追蹤</strong>」，它出發時自動扣來源倉、到貨時自動加目的倉，不會漏帳。
+        </span>
+      </div>
       <div id="manual-transit-table"></div>
     </div>
 
@@ -1153,6 +1160,15 @@ function renderDashboard() {
     twBoxByEan[ean] = (twBoxByEan[ean] || 0) + (parseFloat(m.boxes) || 0);
   });
 
+  // 在途貨物追蹤（Transits）：addTransit 建立時就已經從來源倉扣掉了，
+  // 所以採購建議必須把它加回總量，否則貨在海上的那段期間會憑空消失。
+  var trackedTransitByEan = {};
+  (S.transits || []).forEach(function(t) {
+    if (t.status !== 'TRANSIT') return;
+    var ean = t.ean || ''; if (!ean) return;
+    trackedTransitByEan[ean] = (trackedTransitByEan[ean] || 0) + (parseFloat(t.qty_cartons) || 0);
+  });
+
   // Overseas (AMZLGS) net stock in boxes
   // Movement 可能混有 location=TW 的列，那些已經算在 twBoxByEan 裡，要排除避免重複計算
   var overseasBoxByEan = {};
@@ -1194,10 +1210,8 @@ function renderDashboard() {
     var daily = Number(fba['日均銷量'] || 0); if (!daily) return;
     var qpc   = parseFloat(p.qty_per_carton) || 1;
 
-    var fbaQty      = parseFloat(fba['可出貨數量'] || 0);
-    var inboundQty  = parseFloat(fba['入庫中']    || 0);
-    var reservedQty = parseFloat(fba['預留數量']  || 0);
-    var effectiveQty = fbaQty + inboundQty + reservedQty;
+    // 與 FBA 表格、後端補貨警示同口徑：可出貨 + 入庫中，不含預留
+    var effectiveQty = fbaAvailQty(fba);
     var days = Math.round(effectiveQty / daily);
     if (days >= TARGET_DAYS) return;
 
@@ -1261,8 +1275,11 @@ function renderDashboard() {
     // 在途主要送外倉，Amazon 看不到、外倉分頁也還沒收到，不加回來就等於憑空消失。
     // 用 min 夾住：在途填得比台灣倉多時不會無中生有，twQty + transitQty 恆等於台灣倉總量。
     var transitQty    = Math.min(twBoxes, transitBoxes) * qpc;
+    // Transits 的貨已從來源倉扣掉，加回來不會重複；
+    // 手動在途則是「台灣倉還沒扣」，靠上面的 min 補回缺口，兩者可並存
+    var trackedQty    = (trackedTransitByEan[p.ean] || 0) * qpc;
     var overseasQty   = overseasBoxes * qpc;
-    var totalQty    = fbaQty + twQty + transitQty + overseasQty;
+    var totalQty    = fbaQty + twQty + transitQty + trackedQty + overseasQty;
     var totalDays   = daily > 0 ? Math.round(totalQty / daily) : null;
     var months      = totalDays !== null ? Math.round(totalDays / 30 * 10) / 10 : null;
     var sufficient  = daily > 0 && months !== null && months >= PROD_MONTHS;
@@ -1275,7 +1292,7 @@ function renderDashboard() {
       totalQty: Math.round(totalQty),
       fbaQty: Math.round(fbaQty),
       twQty: Math.round(twQty),
-      transitQty: Math.round(transitQty),
+      transitQty: Math.round(transitQty + trackedQty),
       overseasQty: Math.round(overseasQty),
       totalDays: totalDays, months: months, prodBoxes: prodBoxes, sufficient: sufficient
     });
