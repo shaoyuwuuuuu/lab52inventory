@@ -749,6 +749,25 @@ function testTransitTracking() {
     check('海外倉自動加入 3 箱', ovSum() === 3, '實際=' + ovSum());
     check('狀態轉為 ARRIVED', transitRow().status === 'ARRIVED', '實際=' + transitRow().status);
 
+    // 6. 已到貨的紀錄不可刪除
+    var dr0 = deleteTransit(id);
+    check('已到貨的紀錄擋下刪除', !!(dr0 && dr0.error), JSON.stringify(dr0));
+
+    // 7. 刪除在途中的紀錄要把來源倉補回去
+    var twBase = twSum();
+    var res2 = addTransit({
+      ean: TEST_TRANSIT_EAN_, product_name: '【測試】請忽略', sku: 'TEST-SKU',
+      from_location: 'TW', to_location: 'AMZLGS',
+      qty_cartons: 2, ship_date: '2026-09-04', note: '自動測試-刪除'
+    });
+    var id2 = res2 && res2.id;
+    check('第二筆在途建立成功', !!id2, JSON.stringify(res2));
+    check('台灣倉再扣 2 箱', twSum() === twBase - 2, '實際=' + twSum());
+    var dr = deleteTransit(id2);
+    check('deleteTransit 成功', !!(dr && dr.ok), JSON.stringify(dr));
+    check('刪除後台灣倉回補 2 箱', twSum() === twBase, '實際=' + twSum());
+    check('海外倉未受影響', ovSum() === 3, '實際=' + ovSum());
+
   } catch(e) {
     say('❌ 測試中斷：' + e.message);
   } finally {
@@ -818,13 +837,49 @@ function confirmArrival(transitId, d) {
   } catch(e) { return { error: e.message }; }
 }
 
+// 刪除在途時必須把 addTransit 從來源倉扣掉的箱數加回去。
+// 原本只刪 Transits 那一列，來源倉的 -N 箱會永遠留著，刪一筆就憑空少一批貨。
 function deleteTransit(id) {
   try {
     var tSheet = ss_().getSheetByName('Transits');
+    if (!tSheet) return { error: 'Transits sheet not found' };
     var row = findRow_(tSheet, id);
     if (row < 0) return { error: 'Transit not found' };
+
+    var hdr  = ensureTransitColumns_(tSheet);
+    var vals = tSheet.getRange(row, 1, 1, hdr.length).getValues()[0];
+    function col(name) { var i = hdr.indexOf(name); return i < 0 ? '' : vals[i]; }
+
+    var status  = String(col('status') || '').toUpperCase();
+    var qty     = Math.abs(parseFloat(col('qty_cartons')) || 0);
+    var fromLoc = String(col('from_location') || 'TW');
+
+    // 已到貨的紀錄兩邊庫存都寫過了，直接刪會讓帳目對不起來，也毀掉可追溯的軌跡
+    if (status === 'ARRIVED') {
+      return { error: '已到貨的紀錄不可刪除：來源倉與目的倉的異動都已寫入。如需更正請手動調整庫存。' };
+    }
+
+    if (qty > 0) {
+      var common = {
+        date:     formatDate_(new Date()),
+        ean:      String(col('ean')          || ''),
+        sku:      String(col('sku')          || ''),
+        exp_date: String(col('exp_date')     || ''),
+        boxes:    qty,
+        note:     '在途取消 #' + id
+      };
+      if (fromLoc.toUpperCase() === 'TW') {
+        common.name = String(col('product_name') || '');
+        addTaiwanEntry(common);
+      } else {
+        common.name     = String(col('product_name') || '');
+        common.location = fromLoc;
+        addMovementEntry(common);
+      }
+    }
+
     tSheet.deleteRow(row);
-    return { ok: true };
+    return { ok: true, refunded: qty, refundedTo: fromLoc };
   } catch(e) { return { error: e.message }; }
 }
 

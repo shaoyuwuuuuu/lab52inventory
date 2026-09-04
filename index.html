@@ -1969,10 +1969,13 @@ function confirmArrivalAction() {
 
 function confirmDeleteTransit(id) {
   if (!confirm('確定刪除此在途記錄？注意：已扣除的庫存不會自動還原，如需修正請新增一筆正數異動。')) return;
-  gasCall('deleteTransit', id, function() {
+  gasCall('deleteTransit', id, function(r) {
     S.transits = S.transits.filter(function(t){ return t.id != id; });
-    renderAll();
-    showToast('記錄已刪除', 'success');
+    // 刪除會把箱數退回來源倉，庫存變了要重新取資料，不能只 renderAll
+    showToast(r && r.refunded
+      ? '已刪除，' + r.refunded + ' 箱已退回 ' + (r.refundedTo || '來源倉')
+      : '記錄已刪除', 'success');
+    syncData();
   });
 }
 
