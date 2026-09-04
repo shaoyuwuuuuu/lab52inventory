@@ -1340,8 +1340,8 @@ function renderDashboard() {
       // 每批各自一個表格的話，欄寬會依內容各自伸縮，上下就對不起來了。
       var tHtml = '<div class="table-responsive"><table id="transit-tbl" class="table table-hover mb-0">'
         + '<thead><tr>'
-        + '<th>產品</th><th>EAN</th><th>SKU</th>'
-        + '<th style="text-align:right">箱數</th>'
+        // 全域 CSS 對 th/td 有 text-align:left!important，這裡不再自訂對齊
+        + '<th>產品</th><th>EAN</th><th>SKU</th><th>箱數</th>'
         + '<th>效期</th><th>狀態</th><th>備註</th><th></th>'
         + '</tr></thead><tbody>';
 
@@ -1352,21 +1352,21 @@ function renderDashboard() {
 
         tHtml += '<tr><td colspan="8" class="py-2"'
           + ' style="background:var(--bg3);border-left:4px solid #1E7BC4">'
-          + '<span class="fw-bold" style="font-size:.86rem">'
+          + '<span class="fw-bold">'
           + '<i class="bi bi-box-seam me-1" style="color:#1E7BC4"></i>'
           + (first.ship_date ? escHtml(first.ship_date) + ' 出貨' : '未填出發日') + '</span>'
-          + '<span class="text-muted ms-2" style="font-size:.76rem">'
+          + '<span class="text-muted small ms-2">'
           + escHtml(first.from_location || '') + ' &#8594; ' + escHtml(first.to_location || '') + '</span>'
           + (first.carrier
-              ? '<span class="text-muted ms-2" style="font-size:.76rem">' + escHtml(first.carrier) + '</span>' : '')
+              ? '<span class="text-muted small ms-2">' + escHtml(first.carrier) + '</span>' : '')
           + (first.eta_date
-              ? '<span class="text-muted ms-2" style="font-size:.76rem">ETA ' + escHtml(first.eta_date) + '</span>' : '')
+              ? '<span class="text-muted small ms-2">ETA ' + escHtml(first.eta_date) + '</span>' : '')
           + (trk
-              ? '<a class="ms-2" href="' + trackingUrl(trk) + '" target="_blank" rel="noopener"'
-                + ' style="font-size:.76rem;font-family:monospace">' + escHtml(trk) + '</a>'
-              : '<span class="text-muted ms-2" style="font-size:.76rem">無追蹤號</span>')
+              ? '<a class="small ms-2" href="' + trackingUrl(trk) + '" target="_blank" rel="noopener">'
+                + escHtml(trk) + '</a>'
+              : '<span class="text-muted small ms-2">無追蹤號</span>')
           + '<span class="float-end">'
-          + '<span class="fw-bold me-2" style="font-size:.86rem">'
+          + '<span class="fw-bold me-2">'
           + g.items.length + ' 項　' + (Math.round(boxes * 10) / 10) + ' 箱</span>'
           + '<button class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size:.75rem"'
           + ' title="編輯整批的出發日／ETA／追蹤號／業者"'
@@ -1381,18 +1381,18 @@ function renderDashboard() {
           var state = arriving ? '<span class="badge bg-warning">待確認到貨</span>'
                     : overdue  ? '<span class="badge bg-danger">逾期</span>'
                                : '<span class="text-muted">在途中</span>';
+          // 欄位樣式一律比照 FBA 補貨建議：用 Bootstrap 類別而不是行內字級，
+          // 否則同一頁的表格字體大小與字型會不一致
           tHtml += '<tr' + (arriving ? ' style="background:var(--warn-bg)"' : '') + '>'
-            + '<td><span class="fw-semibold">' + escHtml(t.product_name || t.ean || '?') + '</span></td>'
-            + '<td><span class="text-muted" style="font-family:monospace;font-size:.8rem">'
-            + escHtml(t.ean || '—') + '</span></td>'
-            + '<td><span class="text-muted" style="font-size:.8rem">' + escHtml(t.sku || '—') + '</span></td>'
-            + '<td style="text-align:right;white-space:nowrap">'
-            + '<span class="fw-bold">' + parseFloat(t.qty_cartons).toFixed(1) + '</span>'
-            + '<span class="text-muted" style="font-size:.75rem"> 箱</span></td>'
-            + '<td><span class="text-muted" style="font-size:.8rem">' + escHtml(t.exp_date || '—') + '</span></td>'
+            + '<td class="fw-semibold">' + escHtml(t.product_name || t.ean || '?') + '</td>'
+            + '<td class="text-muted small">' + escHtml(t.ean || '—') + '</td>'
+            + '<td class="text-muted small">' + escHtml(t.sku || '—') + '</td>'
+            + '<td class="fw-bold" style="white-space:nowrap">'
+            + parseFloat(t.qty_cartons).toFixed(1) + ' 箱</td>'
+            + '<td class="text-muted small">' + escHtml(t.exp_date || '—') + '</td>'
             + '<td style="white-space:nowrap">' + state
             + (t.tracking_status
-                ? '<div class="text-muted" style="font-size:.72rem">' + escHtml(t.tracking_status) + '</div>' : '')
+                ? '<div class="text-muted small">' + escHtml(t.tracking_status) + '</div>' : '')
             + '</td>'
             + '<td><span class="note-cell" contenteditable="true" data-tr-note="' + t.id + '"'
             + ' onblur="saveTransitNoteInline(this)"'
