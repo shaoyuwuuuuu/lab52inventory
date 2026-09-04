@@ -1446,11 +1446,8 @@ function checkInventoryFreshness_() {
 function testSyncAlert() {
   var to = RESTOCK_ALERT_EMAIL;
   Logger.log('[測試] 收件人：' + to);
-  try {
-    Logger.log('[測試] 指令碼執行帳號：' + Session.getEffectiveUser().getEmail());
-  } catch(e) {
-    Logger.log('[測試] 取不到執行帳號：' + e.message);
-  }
+  // 執行帳號要用 Session.getEffectiveUser() 才拿得到，但那需要 userinfo.email scope，
+  // 不值得為此新增 scope（見 testSyncAlertTo 的說明）。看編輯器右上角的頭像即可。
   try {
     Logger.log('[測試] 今日剩餘寄信額度：' + MailApp.getRemainingDailyQuota());
   } catch(e) {
@@ -1465,19 +1462,21 @@ function testSyncAlert() {
   return { ok: true, sentTo: to };
 }
 
-// 寄給「執行這支指令碼的帳號」自己。
+// 寄到指令碼屬性 TEST_ALERT_TO 指定的信箱（沒設就退回 RESTOCK_ALERT_EMAIL）。
 // 用來切開兩種失敗：寄不出去（程式／授權問題）vs 寄出去了但沒送達（收件端過濾）。
-// 寄給自己不經過跨網域投遞，只要這封收得到，就確定程式與授權都沒問題。
-function testSyncAlertToSelf() {
-  var me = Session.getEffectiveUser().getEmail();
-  Logger.log('[自我測試] 寄給執行帳號本人：' + me);
-  GmailApp.sendEmail(me, '[Lab52 庫存] 通知管道自我測試',
-    '這封是寄給指令碼執行帳號自己的。\n'
-    + '收到它 = 程式與 Gmail 授權都正常，問題出在寄到 '
-    + RESTOCK_ALERT_EMAIL + ' 的投遞或過濾。\n'
-    + '收不到它 = 問題在指令碼端。');
-  Logger.log('[自我測試] 已送出，請到 ' + me + ' 的信箱確認');
-  return { ok: true, sentTo: me };
+//
+// 這裡刻意不用 Session.getEffectiveUser() 取執行帳號 —— 那需要 userinfo.email scope，
+// 而新增 oauthScopes 會讓網頁應用程式在擁有者重新授權之前失效，
+// 為了一個診斷功能冒這個險不划算。要知道執行帳號直接看編輯器右上角的頭像即可。
+function testSyncAlertTo() {
+  var to = String(PropertiesService.getScriptProperties().getProperty('TEST_ALERT_TO') || '').trim()
+           || RESTOCK_ALERT_EMAIL;
+  Logger.log('[測試] 寄到：' + to);
+  GmailApp.sendEmail(to, '[Lab52 庫存] 通知管道測試',
+    '收到這封，就代表程式與 Gmail 授權都正常，\n'
+    + 'FBA 同步出問題時的通知信也寄得出去。');
+  Logger.log('[測試] sendEmail 呼叫完成、未拋出例外');
+  return { ok: true, sentTo: to };
 }
 
 function syncFbaSalesVelocity_() {
