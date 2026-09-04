@@ -1362,8 +1362,10 @@ function renderDashboard() {
           + (first.eta_date
               ? '<span class="text-muted small ms-2">ETA ' + escHtml(first.eta_date) + '</span>' : '')
           + (trk
-              ? '<a class="small ms-2" href="' + trackingUrl(trk) + '" target="_blank" rel="noopener">'
-                + escHtml(trk) + '</a>'
+              ? '<a class="small ms-2" href="' + trackingUrl(trk, first.carrier) + '"'
+                + ' target="_blank" rel="noopener" title="開啟 '
+                + escHtml(first.carrier || '追蹤') + ' 查詢頁">'
+                + escHtml(trk) + ' <i class="bi bi-box-arrow-up-right"></i></a>'
               : '<span class="text-muted small ms-2">無追蹤號</span>')
           + '<span class="float-end">'
           + '<span class="fw-bold me-2">'
@@ -1987,8 +1989,14 @@ function updateTransitSummary() {
 function isInTransit(t) { return t.status === 'TRANSIT' || t.status === 'ARRIVING'; }
 
 // 通用查詢頁，不必知道是哪家業者就能點開
-function trackingUrl(no) {
-  return 'https://t.17track.net/en#nums=' + encodeURIComponent(no);
+// 認得的業者直接連到官網查詢頁，其餘退回 17TRACK 的通用頁（它會自動辨識業者）
+function trackingUrl(no, carrier) {
+  var n = encodeURIComponent(String(no || '').trim());
+  var c = String(carrier || '').trim().toUpperCase();
+  if (c.indexOf('UPS')   >= 0) return 'https://www.ups.com/track?loc=zh_TW&requester=ST&tracknum=' + n;
+  if (c.indexOf('FEDEX') >= 0) return 'https://www.fedex.com/fedextrack/?trknbr=' + n;
+  if (c.indexOf('DHL')   >= 0) return 'https://www.dhl.com/tw-zh/home/tracking.html?tracking-id=' + n;
+  return 'https://t.17track.net/zh-tw#nums=' + n;
 }
 
 // 整批編輯：出發日／ETA／追蹤號／業者是整批共用的，一筆一筆改要開好幾次視窗
