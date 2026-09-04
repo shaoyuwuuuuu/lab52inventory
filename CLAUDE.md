@@ -19,6 +19,12 @@ deploy.bat      ← clasp push + deploy（注意結尾有 pause，自動化時�
 - `Transits` — 在途貨物追蹤
 - `Billing` — 帳單紀錄
 - `FBA庫存` — SP-API 同步結果（16 欄，見下）
+- `Shared` — 跨裝置共用的小資料（隱藏分頁，`key / value / updated_at`）
+  - `manual_transit_<EAN>` 手動在途、`dash_note_fba_<EAN>` 與 `dash_note_prod_<EAN>` 儀表板備註
+  - 這些原本只存在瀏覽器 localStorage，換裝置就看不到；而表格內的備註
+    （`saveNoteInline`）卻是寫進分頁的 —— 外觀相同行為不同，已統一
+  - 一個 key 一列，改不同產品不會互相覆蓋；但同一格是「最後寫入者勝出」，無衝突偵測
+  - `setSharedBulk` 只補雲端沒有的 key、絕不覆蓋，供 localStorage 舊值一次性搬遷
 
 ## FBA 欄位口徑（已逐項對照賣家後台驗證，勿憑文件推論修改）
 
@@ -58,6 +64,11 @@ SP-API 的欄位分組**不等於**賣家後台的顯示口徑。以下三項都
 |---|---|---|
 | `syncFbaInventory` | 每小時 | `setupFbaTrigger()` 建立 |
 | `syncFbaSalesVelocity` | 每天 07:00 | `setupSalesTrigger()` 建立；順便跑看門狗 |
+| `sendRestockAlert` | 每天 09:00 | `setupRestockAlertTrigger()` 建立 |
+
+**這三個 trigger 都要各自執行對應的 setup 函式才會存在。**
+`sendRestockAlert` 的 trigger 曾長期沒被建立，導致補貨警示從上線起一次都沒發過，
+而當時的診斷只檢查兩支同步函式、驗不出來。`diagFbaSync()` 現在三支都會檢查。
 
 ## 監控與診斷
 
@@ -69,7 +80,14 @@ SP-API 的欄位分組**不等於**賣家後台的顯示口徑。以下三項都
 - `notifySyncFailure_()` — 失敗主動寄信到 `RESTOCK_ALERT_EMAIL`，6 小時節流
 - `checkInventoryFreshness_()` — 每日看門狗，庫存超過 6 小時沒更新就通知
   （補上「trigger 被刪掉就完全沒聲音」這個死角）
-- `testSyncAlert()` — **驗證通知管道真的通，改過收件人或權限後請執行一次**
+- `testSyncAlert()` / `testSyncAlertTo()` — **驗證通知管道真的通，改過收件人或權限後請執行一次**
+  - `testSyncAlertTo()` 寄到指令碼屬性 `TEST_ALERT_TO` 指定的信箱，可測任意位址
+  - 兩支都**刻意不 catch**：寄不出去就要讓例外浮到執行紀錄。
+    第一版走 `notifySyncFailure_`，結果它把自己的例外也吞掉、寄失敗仍回傳 `ok:true`，
+    等於重蹈同步無聲失敗的覆轍
+  - 通知管道已於 2026-09-04 實測寄達 `annicewu@toothfilm.com`
+  - 不要為了診斷去加 `userinfo.email` 之類的 scope：新增 `oauthScopes` 會讓
+    網頁應用程式在擁有者重新授權之前失效
 - `diagFbaSync()` — 逐層檢查 憑證 → Trigger → LWA token → SP-API → 分頁，
   並列印 API 與分頁的值供對照。只印憑證長度，不印內容
 
