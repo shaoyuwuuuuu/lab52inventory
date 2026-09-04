@@ -793,7 +793,7 @@ tr:hover .prod-actions{opacity:1}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-var S = { products:[], movements:[], taiwan:[], billing:[], transits:[], fba:[] };
+var S = { products:[], movements:[], taiwan:[], billing:[], transits:[], fba:[], shared:{} };
 var GAS_MODE = (typeof google !== 'undefined' && typeof google.script !== 'undefined');
 var GAS_URL  = localStorage.getItem('lab52_gas_url') || '';
 var _modals  = {};
@@ -935,6 +935,9 @@ function applyData(data) {
     if (data.billing   !== undefined) S.billing   = toArr(data.billing);
     if (data.transits  !== undefined) S.transits  = toArr(data.transits);
     if (data.fba       !== undefined) S.fba       = toArr(data.fba);
+    if (data.shared    !== undefined) S.shared    = data.shared || {};
+    rebuildManualTransit();
+    migrateLocalToShared();
     var _compCount = S.products.filter(function(p){ return p.components; }).length;
     console.log('[applyData] S.products:', S.products.length, '| 有組件資料:', _compCount, '| 範例:', JSON.stringify((S.products[0]||{}).components));
     scheduleCacheWrite();
@@ -1224,7 +1227,7 @@ function renderDashboard() {
         + _visRestock.map(function(r) {
             var badge = r.days < 28 ? '<span class="badge bg-danger">' + r.days + ' 天</span>'
                                     : '<span class="badge bg-warning">' + r.days + ' 天</span>';
-            var note = localStorage.getItem('dash_note_fba_' + r.ean) || '';
+            var note = (S.shared['dash_note_fba_' + r.ean] || '');
             return '<tr><td class="fw-semibold">' + escHtml(r.name) + '</td>'
               + '<td class="text-muted small">' + escHtml(r.ean) + '</td>'
               + '<td class="text-muted small">' + escHtml(r.sku) + '</td>'
@@ -1418,7 +1421,7 @@ function renderProdSuggest() {
         }
 
         // 備註
-        var note = localStorage.getItem('dash_note_prod_' + r.ean) || '';
+        var note = (S.shared['dash_note_prod_' + r.ean] || '');
 
         return '<tr><td class="fw-semibold">' + escHtml(r.name) + '</td>'
           + '<td class="text-muted small">' + escHtml(r.ean) + '</td>'
@@ -2470,18 +2473,69 @@ function renderManualTransit() {
     + '</tbody></table></div>';
 }
 
+// 手動在途與儀表板備註都改存到 Google Sheets 的 Shared 分頁，換裝置才看得到。
+// 先更新本地狀態再送出，畫面不必等網路來回。
 function saveManualTransit(ean, val) {
   var v = Math.max(0, parseFloat(val) || 0);
   if (v === 0) delete _manualTransit[ean];
   else _manualTransit[ean] = v;
-  localStorage.setItem('lab52_manual_transit', JSON.stringify(_manualTransit));
+  setSharedValue('manual_transit_' + ean, v === 0 ? '' : v);
   renderDashboard();
 }
 
 function saveDashboardNote(el) {
-  var key  = el.getAttribute('data-nk');
-  var note = el.textContent.trim();
-  if (key) localStorage.setItem(key, note);
+  var key = el.getAttribute('data-nk');
+  if (key) setSharedValue(key, el.textContent.trim());
+}
+
+function setSharedValue(key, value) {
+  if (!S.shared) S.shared = {};
+  if (value === '' || value === null || value === undefined) delete S.shared[key];
+  else S.shared[key] = value;
+  if (!GAS_MODE) { showToast('本機模式不會同步到雲端', 'info'); return; }
+  gasCall('setShared', { key: key, value: value }, null, function(e) {
+    showToast('儲存失敗，其他裝置看不到這筆：' + e, 'error');
+  });
+}
+
+// _manualTransit 改由 Shared 的 manual_transit_<ean> 重建，每次收到資料就刷新
+function rebuildManualTransit() {
+  _manualTransit = {};
+  var pre = 'manual_transit_';
+  Object.keys(S.shared || {}).forEach(function(k) {
+    if (k.indexOf(pre) !== 0) return;
+    var v = parseFloat(S.shared[k]) || 0;
+    if (v > 0) _manualTransit[k.slice(pre.length)] = v;
+  });
+}
+
+// 一次性搬遷：舊資料只存在本機。只補雲端還沒有的 key，不覆蓋別台裝置填好的值。
+var _migratedShared = false;
+function migrateLocalToShared() {
+  if (_migratedShared || !GAS_MODE) return;
+  _migratedShared = true;
+  var pairs = [];
+  try {
+    var mt = JSON.parse(localStorage.getItem('lab52_manual_transit') || '{}');
+    Object.keys(mt).forEach(function(ean) {
+      var k = 'manual_transit_' + ean;
+      if (mt[ean] && S.shared[k] === undefined) pairs.push({ key: k, value: mt[ean] });
+    });
+  } catch(e) {}
+  for (var i = 0; i < localStorage.length; i++) {
+    var lk = localStorage.key(i);
+    if (!lk) continue;
+    if (lk.indexOf('dash_note_fba_') !== 0 && lk.indexOf('dash_note_prod_') !== 0) continue;
+    var lv = localStorage.getItem(lk);
+    if (lv && S.shared[lk] === undefined) pairs.push({ key: lk, value: lv });
+  }
+  if (!pairs.length) return;
+  gasCall('setSharedBulk', pairs, function(res) {
+    if (res && res.added) {
+      showToast('已將 ' + res.added + ' 筆本機資料搬到雲端', 'success');
+      syncData();
+    }
+  });
 }
 
 function _csvCell(v) {
@@ -2502,7 +2556,7 @@ function exportFbaRestock() {
   var hdrs = ['產品','EAN','SKU','剩餘天數','建議出貨(箱)','來源','備註'];
   var rows = _restockRows.map(function(r) {
     return [r.name, r.ean, r.sku, r.days, r.shipBoxes, r.source,
-            localStorage.getItem('dash_note_fba_' + r.ean) || ''];
+            (S.shared['dash_note_fba_' + r.ean] || '')];
   });
   _downloadCsv('FBA補貨建議.csv', hdrs, rows);
 }
@@ -2566,7 +2620,7 @@ function exportProdSuggest() {
     return [r.name, r.ean, r.sku, r.totalQty, r.fbaQty, r.overseasQty, r.twQty,
             stock, r.prodBoxes === null ? '' : r.prodBoxes,
             compDetail,
-            localStorage.getItem('dash_note_prod_' + r.ean) || ''];
+            (S.shared['dash_note_prod_' + r.ean] || '')];
   });
   _downloadCsv('採購生產建議.csv', hdrs, csvRows);
 }
@@ -2817,6 +2871,8 @@ var _colResizing = false;
 var _prodRows = [];
 var _prodSort = null; // null = original order, 'urgency' = red→yellow→green
 var _restockRows = [];
+// 首次載入前先用本機的舊值墊著，資料一回來就由 rebuildManualTransit() 換成雲端版本。
+// 舊值只在 migrateLocalToShared() 搬遷時還會用到，之後即以 Shared 分頁為準。
 var _manualTransit = (function() {
   try { return JSON.parse(localStorage.getItem('lab52_manual_transit') || '{}'); }
   catch(e) { return {}; }

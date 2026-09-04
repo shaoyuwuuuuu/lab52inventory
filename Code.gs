@@ -139,9 +139,84 @@ function getAllData() {
     taiwan:    safe(readTaiwanMovements_, 'readTaiwanMovements'),
     transits:  safe(function(){ return readSheet_('Transits'); }, 'readSheet_Transits'),
     billing:   safe(function(){ return readSheet_('Billing'); },  'readSheet_Billing'),
-    fba:       safe(readFbaInventory_,    'readFbaInventory')
+    fba:       safe(readFbaInventory_,    'readFbaInventory'),
+    shared:    safe(readShared_,          'readShared')
   };
   return result;
+}
+
+// ── 跨裝置共用的小資料 ────────────────────────────────────────────────────────
+// 手動在途與儀表板備註原本只存在瀏覽器 localStorage，換一台裝置就看不到，
+// 但表格裡的備註（saveNoteInline）卻是寫進分頁的 —— 外觀一樣、行為不一樣，很容易誤會。
+// 統一改用這張 key/value 分頁。不用指令碼屬性：單筆有 9KB 上限（見 TW_Backup 的教訓）。
+var SHARED_SHEET_ = 'Shared';
+
+function sharedSheet_() {
+  var ss = ss_();
+  var sh = ss.getSheetByName(SHARED_SHEET_);
+  if (!sh) {
+    sh = ss.insertSheet(SHARED_SHEET_);
+    sh.appendRow(['key', 'value', 'updated_at']);
+    sh.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff');
+    sh.setFrozenRows(1);
+    sh.hideSheet();
+  }
+  return sh;
+}
+
+function readShared_() {
+  var sh = sharedSheet_();
+  if (sh.getLastRow() <= 1) return {};
+  var out = {};
+  sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().forEach(function(r) {
+    var k = String(r[0] || '').trim();
+    if (k) out[k] = r[1];
+  });
+  return out;
+}
+
+function setShared(d) {
+  try {
+    if (!d || !d.key) return { error: 'key 不可為空' };
+    var key  = String(d.key).trim();
+    var val  = d.value == null ? '' : d.value;
+    var sh   = sharedSheet_();
+    var last = sh.getLastRow();
+    var keys = last > 1 ? sh.getRange(2, 1, last - 1, 1).getValues() : [];
+    var row  = -1;
+    for (var i = 0; i < keys.length; i++) {
+      if (String(keys[i][0] || '').trim() === key) { row = i + 2; break; }
+    }
+    var now   = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+    var blank = (val === '' || val === null);
+    if (row > 0) {
+      if (blank) sh.deleteRow(row);   // 清空就整列刪掉，免得分頁長滿空值
+      else sh.getRange(row, 2, 1, 2).setValues([[val, now]]);
+    } else if (!blank) {
+      sh.appendRow([key, val, now]);
+    }
+    return { ok: true };
+  } catch(e) { return { error: e.message }; }
+}
+
+// 舊 localStorage 資料一次性搬遷用。
+// 只補雲端還沒有的 key，絕不覆蓋 —— 否則會蓋掉別台裝置已經填好的值。
+function setSharedBulk(pairs) {
+  try {
+    if (!pairs || !pairs.length) return { ok: true, added: 0 };
+    var existing = readShared_();
+    var sh   = sharedSheet_();
+    var now  = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+    var rows = [];
+    pairs.forEach(function(p) {
+      var k = String((p && p.key) || '').trim();
+      if (!k || existing[k] !== undefined) return;
+      if (p.value === '' || p.value == null) return;
+      rows.push([k, p.value, now]);
+    });
+    if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, 3).setValues(rows);
+    return { ok: true, added: rows.length };
+  } catch(e) { return { error: e.message }; }
 }
 
 function readProducts_() {
