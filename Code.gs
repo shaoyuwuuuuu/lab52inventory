@@ -676,6 +676,108 @@ function markTransitArriving(transitId) {
   } catch(e) { return { error: e.message }; }
 }
 
+// ── 自我測試：在途追蹤（階段一）───────────────────────────────────────────────
+// 在 GAS 編輯器選 testTransitTracking 執行，看下方執行紀錄。
+// 會建立一筆測試在途、逐項驗證，最後把自己造成的痕跡全部刪除（含台灣倉／海外倉的異動列）。
+// 用不存在的英數 EAN，不會碰到任何真實產品的庫存。
+var TEST_TRANSIT_EAN_ = 'ZZTEST0000001';
+
+function testTransitTracking() {
+  var out = [];
+  function say(s) { out.push(s); Logger.log(s); }
+  function check(label, cond, detail) {
+    say((cond ? '✅ ' : '❌ ') + label + (detail ? '　（' + detail + '）' : ''));
+    return cond;
+  }
+
+  var tSheet = ss_().getSheetByName('Transits');
+  if (!tSheet) { say('❌ 找不到 Transits 分頁'); return out.join('\n'); }
+
+  var id = null;
+  try {
+    // 1. 追蹤欄位補齊
+    var hdr = ensureTransitColumns_(tSheet);
+    TRANSIT_TRACK_COLS_.forEach(function(c) {
+      check('欄位存在：' + c, hdr.indexOf(c) >= 0);
+    });
+
+    // 2. 建立在途（含追蹤號）
+    var res = addTransit({
+      ean: TEST_TRANSIT_EAN_, product_name: '【測試】請忽略', sku: 'TEST-SKU',
+      from_location: 'TW', to_location: 'AMZLGS',
+      qty_cartons: 3, ship_date: '2026-09-04', eta_date: '2026-09-20',
+      tracking_no: 'TEST1234567890', carrier: 'dhl', note: '自動測試'
+    });
+    check('addTransit 成功', !!(res && res.ok), JSON.stringify(res));
+    id = res && res.id;
+    if (!id) throw new Error('拿不到 transit id');
+
+    function transitRow() {
+      return readSheet_('Transits').filter(function(r) { return r.id == id; })[0] || {};
+    }
+    function twSum() {
+      return readTaiwanMovements_()
+        .filter(function(m) { return m.ean === TEST_TRANSIT_EAN_; })
+        .reduce(function(n, m) { return n + (parseFloat(m.boxes) || 0); }, 0);
+    }
+    function ovSum() {
+      return readMovements_()
+        .filter(function(m) { return m.ean === TEST_TRANSIT_EAN_; })
+        .reduce(function(n, m) { return n + (parseFloat(m.boxes) || 0); }, 0);
+    }
+
+    var r1 = transitRow();
+    check('追蹤號寫入正確', r1.tracking_no === 'TEST1234567890', '實際=' + r1.tracking_no);
+    check('業者寫入正確',   r1.carrier === 'dhl',                '實際=' + r1.carrier);
+    check('初始狀態 TRANSIT', r1.status === 'TRANSIT',           '實際=' + r1.status);
+    check('箱數正確',        Number(r1.qty_cartons) === 3,       '實際=' + r1.qty_cartons);
+
+    // 3. 出貨時台灣倉應自動扣掉
+    check('台灣倉自動扣除 3 箱', twSum() === -3, '實際=' + twSum());
+    check('此時海外倉尚未入帳',  ovSum() === 0,  '實際=' + ovSum());
+
+    // 4. 標記待確認到貨 —— 這一步絕對不能碰庫存
+    var mr = markTransitArriving(id);
+    check('markTransitArriving 成功', !!(mr && mr.ok), JSON.stringify(mr));
+    check('狀態轉為 ARRIVING', transitRow().status === 'ARRIVING', '實際=' + transitRow().status);
+    check('ARRIVING 沒有動到台灣倉', twSum() === -3, '實際=' + twSum());
+    check('ARRIVING 沒有寫進海外倉', ovSum() === 0,  '實際=' + ovSum());
+
+    // 5. 確認到貨 → 海外倉入帳
+    var cr = confirmArrival(id, { arrived_date: '2026-09-21' });
+    check('confirmArrival 成功', !!(cr && cr.ok), JSON.stringify(cr));
+    check('海外倉自動加入 3 箱', ovSum() === 3, '實際=' + ovSum());
+    check('狀態轉為 ARRIVED', transitRow().status === 'ARRIVED', '實際=' + transitRow().status);
+
+  } catch(e) {
+    say('❌ 測試中斷：' + e.message);
+  } finally {
+    say('🧹 ' + cleanupTestTransit_());
+  }
+  return out.join('\n');
+}
+
+// 把測試 EAN 在三張分頁留下的列全部刪掉，不留痕跡
+function cleanupTestTransit_() {
+  var ss = ss_(), removed = 0;
+  [['Transits', ['ean']], ['TW_Movement', ['ean']], ['Movement', ['EAN', 'ean']]]
+    .forEach(function(pair) {
+      var sh = ss.getSheetByName(pair[0]);
+      if (!sh || sh.getLastRow() < 2) return;
+      var vals = sh.getDataRange().getValues();
+      var hdr  = vals[0].map(function(h) { return String(h).trim(); });
+      var iE = -1;
+      pair[1].forEach(function(name) { if (iE < 0) iE = hdr.indexOf(name); });
+      if (iE < 0) return;
+      for (var r = vals.length - 1; r >= 1; r--) {
+        if (String(vals[r][iE] || '').trim() === TEST_TRANSIT_EAN_) {
+          sh.deleteRow(r + 1); removed++;
+        }
+      }
+    });
+  return '清理完成，刪除 ' + removed + ' 列測試資料';
+}
+
 function confirmArrival(transitId, d) {
   try {
     var tSheet = ss_().getSheetByName('Transits');
