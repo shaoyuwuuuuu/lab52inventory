@@ -1260,9 +1260,16 @@ function diagFbaSync() {
   trs.forEach(function(t) {
     say('[2 Trigger] ' + t.getHandlerFunction() + '（' + t.getEventType() + '）');
   });
-  ['syncFbaInventory','syncFbaSalesVelocity'].forEach(function(fn) {
-    var found = trs.some(function(t){ return t.getHandlerFunction() === fn; });
-    if (!found) say('[2 Trigger] ★ 找不到 ' + fn + ' 的 trigger，這個同步根本不會自己跑 ★');
+  // sendRestockAlert 也要檢查 —— 它的 trigger 一直沒被建立過，
+  // 導致補貨警示從上線以來一次都沒發出，而原本的診斷只看兩支同步、驗不出來。
+  [['syncFbaInventory',     'setupFbaTrigger()'],
+   ['syncFbaSalesVelocity', 'setupSalesTrigger()'],
+   ['sendRestockAlert',     'setupRestockAlertTrigger()']].forEach(function(pair) {
+    var found = trs.some(function(t) { return t.getHandlerFunction() === pair[0]; });
+    if (!found) {
+      say('[2 Trigger] ★ 找不到 ' + pair[0] + ' 的 trigger，它不會自己跑'
+          + '（要啟用請執行 ' + pair[1] + '）★');
+    }
   });
 
   // 3. LWA 換 token（Amazon 的錯誤回應只有錯誤碼，不含憑證內容）
