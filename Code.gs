@@ -735,6 +735,26 @@ function updateTransit(transitId, d) {
   } catch(e) { return { error: e.message }; }
 }
 
+// 一次更新多筆在途的共用欄位（出發日／ETA／追蹤號／業者）。
+// 這些本來就是整批共用的，一筆一筆改要開六次視窗。
+// 刻意不接受 qty_cartons —— 箱數每筆不同，批次套用只會改錯。
+function updateTransitMany(ids, d) {
+  try {
+    if (!ids || !ids.length) return { error: '沒有指定要更新的在途' };
+    var fields = {};
+    ['ship_date', 'eta_date', 'tracking_no', 'carrier'].forEach(function(f) {
+      if (d && d[f] !== undefined) fields[f] = d[f];
+    });
+    var updated = 0, failed = [];
+    ids.forEach(function(id) {
+      var r = updateTransit(id, fields);
+      if (r && r.ok) updated++;
+      else failed.push({ id: id, error: (r && r.error) || '未知錯誤' });
+    });
+    return { ok: failed.length === 0, updated: updated, failed: failed };
+  } catch(e) { return { error: e.message }; }
+}
+
 // 整批退回來源倉（報關不過、地址錯誤、快遞退件…）。
 // 與 deleteTransit 的差別：紀錄保留下來、狀態轉 RETURNED，可追溯這批貨發生過什麼事。
 // 箱數補回來源倉，備註寫「在途退回 #id」，與出發時的扣除對稱。

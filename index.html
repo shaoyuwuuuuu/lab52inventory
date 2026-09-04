@@ -793,6 +793,47 @@ tr:hover .prod-actions{opacity:1}
   </div>
 </div>
 
+<!-- ── Modal: 編輯整批在途 ──────────────────────────────────────────────────── -->
+<div class="modal fade" id="batchEditModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">編輯整批</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="be-info" class="mb-3 p-2" style="background:var(--bg3);border-radius:8px;font-size:.85rem;line-height:1.7;"></div>
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label small">出發日期</label>
+            <input type="date" class="form-control form-control-sm" id="be-ship-date">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">預計到貨（ETA）</label>
+            <input type="date" class="form-control form-control-sm" id="be-eta">
+          </div>
+          <div class="col-8">
+            <label class="form-label small">追蹤號</label>
+            <input type="text" class="form-control form-control-sm" id="be-tracking-no">
+          </div>
+          <div class="col-4">
+            <label class="form-label small">業者</label>
+            <input type="text" class="form-control form-control-sm" id="be-carrier" placeholder="UPS…">
+          </div>
+        </div>
+        <input type="hidden" id="be-ids">
+        <div class="mt-2 p-2" style="background:var(--warn-bg);border-radius:6px;font-size:.78rem;color:var(--warn-text);">
+          <i class="bi bi-info-circle me-1"></i>這四個欄位會套用到整批的每一筆。箱數與效期各筆不同，請用該列的鉛筆單獨修改。
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary btn-sm" id="be-save-btn" onclick="saveBatchEdit()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Modal: 編輯在途 ──────────────────────────────────────────────────────── -->
 <div class="modal fade" id="editTransitModal" tabindex="-1">
   <div class="modal-dialog">
@@ -1324,8 +1365,14 @@ function renderDashboard() {
               ? '<a class="ms-2" href="' + trackingUrl(trk) + '" target="_blank" rel="noopener"'
                 + ' style="font-size:.76rem;font-family:monospace">' + escHtml(trk) + '</a>'
               : '<span class="text-muted ms-2" style="font-size:.76rem">無追蹤號</span>')
-          + '<span class="float-end fw-bold" style="font-size:.86rem">'
+          + '<span class="float-end">'
+          + '<span class="fw-bold me-2" style="font-size:.86rem">'
           + g.items.length + ' 項　' + (Math.round(boxes * 10) / 10) + ' 箱</span>'
+          + '<button class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size:.75rem"'
+          + ' title="編輯整批的出發日／ETA／追蹤號／業者"'
+          + ' onclick="openBatchEditModal(\''
+          + g.items.map(function(x){ return x.id; }).join(',') + '\')">'
+          + '<i class="bi bi-pencil"></i></button></span>'
           + '</td></tr>';
 
         g.items.forEach(function(t) {
@@ -1942,6 +1989,52 @@ function isInTransit(t) { return t.status === 'TRANSIT' || t.status === 'ARRIVIN
 // 通用查詢頁，不必知道是哪家業者就能點開
 function trackingUrl(no) {
   return 'https://t.17track.net/en#nums=' + encodeURIComponent(no);
+}
+
+// 整批編輯：出發日／ETA／追蹤號／業者是整批共用的，一筆一筆改要開好幾次視窗
+function openBatchEditModal(idsCsv) {
+  var ids = String(idsCsv).split(',').map(function(s){ return parseInt(s); }).filter(Boolean);
+  if (!ids.length) return;
+  var items = ids.map(function(id) {
+    return S.transits.find(function(x){ return x.id == id; });
+  }).filter(Boolean);
+  if (!items.length) return;
+  var first = items[0];
+  document.getElementById('be-ids').value         = ids.join(',');
+  document.getElementById('be-ship-date').value   = first.ship_date   || '';
+  document.getElementById('be-eta').value         = first.eta_date    || '';
+  document.getElementById('be-tracking-no').value = first.tracking_no || '';
+  document.getElementById('be-carrier').value     = first.carrier     || '';
+  var boxes = items.reduce(function(n, x){ return n + (parseFloat(x.qty_cartons) || 0); }, 0);
+  document.getElementById('be-info').innerHTML =
+    '<div class="fw-semibold">' + escHtml(first.from_location || '') + ' &#8594; '
+    + escHtml(first.to_location || '') + '</div>'
+    + '<div class="text-muted" style="font-size:.8rem">'
+    + items.length + ' 項　共 ' + (Math.round(boxes * 10) / 10) + ' 箱</div>';
+  getModal('batchEditModal').show();
+}
+
+function saveBatchEdit() {
+  var btn = document.getElementById('be-save-btn');
+  if (btn && btn.disabled) return;
+  var ids = String(document.getElementById('be-ids').value)
+    .split(',').map(function(s){ return parseInt(s); }).filter(Boolean);
+  if (!ids.length) return;
+  if (btn) { btn.disabled = true; btn.textContent = '儲存中…'; }
+  function resetBtn() { if (btn) { btn.disabled = false; btn.textContent = '儲存'; } }
+  gasCall2('updateTransitMany', ids, {
+    ship_date:   document.getElementById('be-ship-date').value,
+    eta_date:    document.getElementById('be-eta').value,
+    tracking_no: document.getElementById('be-tracking-no').value.trim(),
+    carrier:     document.getElementById('be-carrier').value.trim()
+  }, function(r) {
+    resetBtn();
+    getModal('batchEditModal').hide();
+    var failed = (r && r.failed) || [];
+    if (failed.length) showToast('更新 ' + (r.updated || 0) + ' 筆，' + failed.length + ' 筆失敗', 'error');
+    else showToast('已更新整批 ' + ((r && r.updated) || 0) + ' 筆', 'success');
+    syncData();
+  }, function(e) { resetBtn(); showToast('更新失敗：' + e, 'error'); });
 }
 
 // 在途備註行內編輯。只送 note，不帶箱數，所以完全不會觸發庫存調整。
