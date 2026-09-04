@@ -676,6 +676,37 @@ function markTransitArriving(transitId) {
   } catch(e) { return { error: e.message }; }
 }
 
+// 一次建立多筆在途：同一批出貨常常有好幾種產品，共用出發日／ETA／追蹤號。
+// 逐筆從前端呼叫會來回好幾趟又容易中途斷掉（台灣倉匯入就是這樣才改成批次的）。
+// 內部仍走 addTransit，庫存扣除的邏輯只留一份，不重複實作。
+function addTransitBatch(d) {
+  try {
+    if (!d || !d.items || !d.items.length) return { error: '沒有要出貨的品項' };
+    var created = [], failed = [];
+    d.items.forEach(function(it) {
+      var qty = Math.abs(parseFloat(it.qty_cartons) || 0);
+      if (!qty) { failed.push({ ean: it.ean, error: '箱數為 0' }); return; }
+      var r = addTransit({
+        ean:           it.ean,
+        product_name:  it.product_name,
+        sku:           it.sku,
+        from_location: d.from_location,
+        to_location:   d.to_location,
+        qty_cartons:   qty,
+        exp_date:      it.exp_date || '',
+        ship_date:     d.ship_date,
+        eta_date:      d.eta_date,
+        tracking_no:   d.tracking_no,
+        carrier:       d.carrier,
+        note:          d.note
+      });
+      if (r && r.ok) created.push(r.id);
+      else failed.push({ ean: it.ean, error: (r && r.error) || '未知錯誤' });
+    });
+    return { ok: failed.length === 0, created: created, failed: failed, count: created.length };
+  } catch(e) { return { error: e.message }; }
+}
+
 // ── 自我測試：在途追蹤（階段一）───────────────────────────────────────────────
 // 在 GAS 編輯器選 testTransitTracking 執行，看下方執行紀錄。
 // 會建立一筆測試在途、逐項驗證，最後把自己造成的痕跡全部刪除（含台灣倉／海外倉的異動列）。

@@ -702,28 +702,23 @@ tr:hover .prod-actions{opacity:1}
 
 <!-- ── Modal: 新增在途出貨 ──────────────────────────────────────────────────── -->
 <div class="modal fade" id="transitModal" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">新增在途出貨</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <div class="mb-2">
-          <label class="form-label small fw-semibold">產品 <span class="text-danger">*</span></label>
-          <select class="form-select form-select-sm" id="tr-product-ean">
-            <option value="">-- 選擇產品 --</option>
-          </select>
-        </div>
+        <!-- 共用欄位：同一批出貨只需填一次 -->
         <div class="row g-2">
-          <div class="col-6">
+          <div class="col-6 col-md-3">
             <label class="form-label small">出發倉 <span class="text-danger">*</span></label>
-            <select class="form-select form-select-sm" id="tr-from-location">
+            <select class="form-select form-select-sm" id="tr-from-location" onchange="renderTransitItems()">
               <option value="TW">TW（台灣倉）</option>
               <option value="AMZLGS">AMZLGS（外倉）</option>
             </select>
           </div>
-          <div class="col-6">
+          <div class="col-6 col-md-3">
             <label class="form-label small">目的地倉 <span class="text-danger">*</span></label>
             <select class="form-select form-select-sm" id="tr-to-location">
               <option value="AMZLGS">AMZLGS（外倉）</option>
@@ -731,42 +726,52 @@ tr:hover .prod-actions{opacity:1}
               <option value="TW">TW（台灣）</option>
             </select>
           </div>
-          <div class="col-6">
-            <label class="form-label small">出貨箱數 <span class="text-danger">*</span></label>
-            <input type="number" step="0.5" min="0.5" class="form-control form-control-sm" id="tr-qty" placeholder="0.0">
-          </div>
-          <div class="col-6">
-            <label class="form-label small">效期（exp_date）</label>
-            <input type="date" class="form-control form-control-sm" id="tr-exp-date">
-          </div>
-          <div class="col-6">
+          <div class="col-6 col-md-3">
             <label class="form-label small">出發日期</label>
             <input type="date" class="form-control form-control-sm" id="tr-ship-date">
           </div>
-          <div class="col-6">
+          <div class="col-6 col-md-3">
             <label class="form-label small">預計到貨（ETA）</label>
             <input type="date" class="form-control form-control-sm" id="tr-eta">
           </div>
-          <div class="col-8">
+          <div class="col-8 col-md-5">
             <label class="form-label small">追蹤號</label>
             <input type="text" class="form-control form-control-sm" id="tr-tracking-no"
                    placeholder="海運沒有就留空">
           </div>
-          <div class="col-4">
+          <div class="col-4 col-md-3">
             <label class="form-label small">業者</label>
-            <input type="text" class="form-control form-control-sm" id="tr-carrier"
-                   placeholder="選填">
+            <input type="text" class="form-control form-control-sm" id="tr-carrier" placeholder="選填">
           </div>
-          <div class="col-12">
+          <div class="col-12 col-md-4">
             <label class="form-label small">備注</label>
             <input type="text" class="form-control form-control-sm" id="tr-note">
           </div>
         </div>
+
+        <!-- 品項：列出來源倉有庫存的產品，填了箱數的才會建立 -->
+        <div class="d-flex align-items-center justify-content-between mt-3 mb-1">
+          <span class="fw-semibold small">出貨品項</span>
+          <input type="text" class="form-control form-control-sm" id="tr-item-search"
+                 placeholder="搜尋產品 / EAN" style="width:200px" oninput="renderTransitItems()">
+        </div>
+        <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+          <table class="table table-sm mb-0" id="tr-items-table">
+            <thead><tr>
+              <th>產品</th>
+              <th style="text-align:right;width:90px">來源倉</th>
+              <th style="width:120px">出貨箱數</th>
+              <th style="text-align:right;width:90px">扣除後</th>
+            </tr></thead>
+            <tbody id="tr-items-body"></tbody>
+          </table>
+        </div>
         <div class="mt-2 p-2" style="background:var(--warn-bg);border-radius:6px;font-size:.78rem;color:var(--warn-text);">
-          <i class="bi bi-info-circle me-1"></i>儲存後將自動從出發倉扣除庫存，並記錄出貨異動
+          <i class="bi bi-info-circle me-1"></i>儲存後每個填了箱數的品項各建立一筆在途，共用同一組追蹤號，並自動從出發倉扣除庫存
         </div>
       </div>
       <div class="modal-footer">
+        <span class="text-muted small me-auto" id="tr-summary"></span>
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
         <button class="btn btn-primary btn-sm" id="tr-save-btn" onclick="saveTransit()">確認出貨</button>
       </div>
@@ -1858,18 +1863,125 @@ function inferMvType(m) {
 
 // ── Transit Functions ─────────────────────────────────────────────────────────
 function openTransitModal() {
-  var prodOpts = S.products.map(function(p) {
-    return '<option value="' + escHtml(p.ean) + '">' + escHtml(p.name || p.ean) + '</option>';
-  }).join('');
-  document.getElementById('tr-product-ean').innerHTML = '<option value="">-- 選擇產品 --</option>' + prodOpts;
   document.getElementById('tr-from-location').value = 'TW';
   document.getElementById('tr-to-location').value = 'AMZLGS';
   document.getElementById('tr-ship-date').value = new Date().toISOString().slice(0,10);
   document.getElementById('tr-eta').value = '';
-  document.getElementById('tr-qty').value = '';
-  document.getElementById('tr-exp-date').value = '';
+  document.getElementById('tr-tracking-no').value = '';
+  document.getElementById('tr-carrier').value = '';
   document.getElementById('tr-note').value = '';
+  document.getElementById('tr-item-search').value = '';
+  _trQty = {};
+  renderTransitItems();
   getModal('transitModal').show();
+}
+
+// 使用者填的箱數存在這裡而不是只留在 DOM —— 搜尋或切換來源倉會重繪表格，
+// 只靠 DOM 的話已經填好的數字會被洗掉（台灣倉匯入預覽就踩過這個坑）。
+var _trQty = {};
+
+// 來源倉的現有庫存（箱）。TW 讀台灣倉，其餘讀 Movement 中該 location 的淨額。
+function stockForLocation(loc) {
+  var out = {};
+  if (String(loc).toUpperCase() === 'TW') {
+    (S.taiwan || []).forEach(function(m) {
+      var ean = m.ean || ''; if (!ean) return;
+      out[ean] = (out[ean] || 0) + (parseFloat(m.boxes) || 0);
+    });
+  } else {
+    (S.movements || []).forEach(function(m) {
+      var ean = m.ean || ''; if (!ean) return;
+      if (String(m.location || 'AMZLGS').toUpperCase() !== String(loc).toUpperCase()) return;
+      out[ean] = (out[ean] || 0) + (parseFloat(m.boxes) || 0);
+    });
+  }
+  return out;
+}
+
+function renderTransitItems() {
+  syncTransitQty();   // 重繪前先把畫面上的值收回來
+  var loc   = document.getElementById('tr-from-location').value;
+  var stock = stockForLocation(loc);
+  var q     = (document.getElementById('tr-item-search').value || '').trim().toLowerCase();
+
+  var rows = (S.products || []).filter(function(p) {
+    if (!(stock[p.ean] > 0) && !_trQty[p.ean]) return false;   // 沒庫存但已填數量的仍要顯示
+    if (!q) return true;
+    return (p.name || '').toLowerCase().indexOf(q) >= 0
+        || (p.ean  || '').toLowerCase().indexOf(q) >= 0
+        || (p.sku  || '').toLowerCase().indexOf(q) >= 0;
+  });
+
+  var tbody = document.getElementById('tr-items-body');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">'
+      + (q ? '沒有符合的產品' : loc + ' 沒有庫存') + '</td></tr>';
+    updateTransitSummary();
+    return;
+  }
+
+  tbody.innerHTML = rows.map(function(p) {
+    var have = Math.round((stock[p.ean] || 0) * 10) / 10;
+    var val  = _trQty[p.ean] || '';
+    return '<tr>'
+      + '<td style="font-size:.82rem">' + escHtml(p.name || p.ean)
+      + '<div class="text-muted" style="font-size:.7rem;font-family:monospace">' + escHtml(p.ean || '') + '</div></td>'
+      + '<td style="text-align:right">' + have
+      + ' <a href="#" onclick="fillTransitAll(\'' + escHtml(p.ean) + '\',' + have + ');return false"'
+      + ' style="font-size:.7rem">全部</a></td>'
+      + '<td><input type="number" step="0.5" min="0" class="form-control form-control-sm"'
+      + ' data-tr-ean="' + escHtml(p.ean) + '" value="' + val + '" placeholder="0"'
+      + ' oninput="onTransitQtyInput()"></td>'
+      + '<td style="text-align:right" id="tr-left-' + escHtml(p.ean) + '"></td>'
+      + '</tr>';
+  }).join('');
+  updateTransitLeft();
+  updateTransitSummary();
+}
+
+function fillTransitAll(ean, have) {
+  _trQty[ean] = have;
+  renderTransitItems();
+}
+
+function syncTransitQty() {
+  document.querySelectorAll('[data-tr-ean]').forEach(function(el) {
+    var ean = el.getAttribute('data-tr-ean');
+    var v = parseFloat(el.value);
+    if (v > 0) _trQty[ean] = v; else delete _trQty[ean];
+  });
+}
+
+function onTransitQtyInput() {
+  syncTransitQty();
+  updateTransitLeft();
+  updateTransitSummary();
+}
+
+// 扣除後餘額，負數標紅但不阻擋 —— 實際出貨時帳面可能還沒更新
+function updateTransitLeft() {
+  var stock = stockForLocation(document.getElementById('tr-from-location').value);
+  document.querySelectorAll('[data-tr-ean]').forEach(function(el) {
+    var ean  = el.getAttribute('data-tr-ean');
+    var left = Math.round(((stock[ean] || 0) - (_trQty[ean] || 0)) * 10) / 10;
+    var cell = document.getElementById('tr-left-' + ean);
+    if (cell) {
+      cell.textContent = left;
+      cell.style.color = left < 0 ? 'var(--danger-text)' : '';
+      cell.style.fontWeight = left < 0 ? '600' : '';
+    }
+  });
+}
+
+function updateTransitSummary() {
+  var eans = Object.keys(_trQty).filter(function(k) { return _trQty[k] > 0; });
+  var total = eans.reduce(function(n, k) { return n + _trQty[k]; }, 0);
+  var el = document.getElementById('tr-summary');
+  if (el) el.textContent = eans.length
+    ? '已選 ' + eans.length + ' 項，共 ' + (Math.round(total * 10) / 10) + ' 箱'
+    : '尚未填入任何箱數';
+  var btn = document.getElementById('tr-save-btn');
+  if (btn) btn.textContent = eans.length ? '確認出貨（' + eans.length + ' 筆）' : '確認出貨';
 }
 
 // ARRIVING（待確認到貨）的貨還沒寫進任何倉，庫存計算上仍然算在途
@@ -1892,38 +2004,39 @@ function markArriving(transitId) {
 function saveTransit() {
   var btn = document.getElementById('tr-save-btn');
   if (btn && btn.disabled) return;
-  var ean      = document.getElementById('tr-product-ean').value;
-  var qty      = parseFloat(document.getElementById('tr-qty').value);
+  syncTransitQty();
   var shipDate = document.getElementById('tr-ship-date').value;
-  if (!ean || isNaN(qty) || qty <= 0 || !shipDate) {
-    showToast('請選擇產品、填寫箱數和出發日期', 'error');
-    return;
-  }
-  var p = S.products.find(function(x){ return x.ean === ean; }) || {};
-  var data = {
-    ean:           ean,
-    product_name:  p.name || '',
-    sku:           p.sku  || '',
-    asin:          p.asin || '',
+  var items = Object.keys(_trQty).filter(function(k){ return _trQty[k] > 0; }).map(function(ean) {
+    var p = S.products.find(function(x){ return x.ean === ean; }) || {};
+    return { ean: ean, product_name: p.name || '', sku: p.sku || '', qty_cartons: _trQty[ean] };
+  });
+  if (!items.length) { showToast('請至少填一個品項的箱數', 'error'); return; }
+  if (!shipDate)     { showToast('請填出發日期', 'error'); return; }
+
+  var payload = {
     from_location: document.getElementById('tr-from-location').value,
     to_location:   document.getElementById('tr-to-location').value,
-    qty_cartons:   qty,
-    exp_date:      document.getElementById('tr-exp-date').value,
     ship_date:     shipDate,
     eta_date:      document.getElementById('tr-eta').value,
     tracking_no:   document.getElementById('tr-tracking-no').value.trim(),
     carrier:       document.getElementById('tr-carrier').value.trim(),
-    note:          document.getElementById('tr-note').value.trim()
+    note:          document.getElementById('tr-note').value.trim(),
+    items:         items
   };
   if (btn) { btn.disabled = true; btn.textContent = '送出中…'; }
-  function resetBtn() { if (btn) { btn.disabled = false; btn.textContent = '確認出貨'; } }
-  gasCall('addTransit', data, function(r) {
+  function resetBtn() { if (btn) { btn.disabled = false; updateTransitSummary(); } }
+  gasCall('addTransitBatch', payload, function(r) {
     resetBtn();
-    data.id = r.id;
-    data.status = 'TRANSIT';
-    S.transits.push(data);
     getModal('transitModal').hide();
-    showToast('出貨已記錄', 'success');
+    _trQty = {};
+    var failed = (r && r.failed) || [];
+    if (failed.length) {
+      // 部分失敗要講清楚是哪幾筆，不能只說「成功」
+      showToast('已建立 ' + (r.created || []).length + ' 筆，'
+        + failed.length + ' 筆失敗：' + failed.map(function(f){ return f.ean; }).join('、'), 'error');
+    } else {
+      showToast('已建立 ' + (r && r.count) + ' 筆在途出貨', 'success');
+    }
     syncData();
   }, function(e) { resetBtn(); showToast('儲存失敗：' + e, 'error'); });
 }
