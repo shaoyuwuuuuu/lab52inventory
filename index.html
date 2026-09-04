@@ -809,6 +809,40 @@ tr:hover .prod-actions{opacity:1}
   </div>
 </div>
 
+<!-- ── Modal: 在途退回 ──────────────────────────────────────────────────────── -->
+<div class="modal fade" id="returnModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">整批退回來源倉</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="rt-info" class="mb-3 p-2" style="background:var(--bg3);border-radius:8px;font-size:.85rem;line-height:1.7;"></div>
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label small fw-semibold">退回日期</label>
+            <input type="date" class="form-control form-control-sm" id="rt-date">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">原因</label>
+            <input type="text" class="form-control form-control-sm" id="rt-reason"
+                   placeholder="報關不過、地址錯誤…">
+          </div>
+        </div>
+        <input type="hidden" id="rt-transit-id">
+        <div class="mt-2 p-2" style="background:var(--warn-bg);border-radius:6px;font-size:.78rem;color:var(--warn-text);">
+          <i class="bi bi-info-circle me-1"></i>箱數會補回來源倉，紀錄保留並標為已退回（不會被刪掉）
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-warning btn-sm" id="rt-save-btn" onclick="returnTransitAction()">確認退回</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast-container"></div>
 
@@ -1578,6 +1612,8 @@ function renderDashboard_OLD_UNUSED() {
           + (arriving ? '' :
               '<button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.75rem"'
               + ' title="貨到了但還沒點收" onclick="markArriving(' + t.id + ')">已送達</button>')
+          + '<button class="btn btn-sm btn-outline-warning py-0" style="font-size:.75rem"'
+          + ' title="整批退回來源倉" onclick="openReturnModal(' + t.id + ')">退回</button>'
           + '<button class="btn btn-sm btn-outline-primary py-0" style="font-size:.75rem"'
           + ' onclick="openArrivalModal(' + t.id + ')">確認到貨</button>'
           + '</div></div>';
@@ -1990,6 +2026,42 @@ function isInTransit(t) { return t.status === 'TRANSIT' || t.status === 'ARRIVIN
 // 通用查詢頁，不必知道是哪家業者就能點開
 function trackingUrl(no) {
   return 'https://t.17track.net/en#nums=' + encodeURIComponent(no);
+}
+
+function openReturnModal(transitId) {
+  var t = S.transits.find(function(x){ return x.id == transitId; });
+  if (!t) return;
+  document.getElementById('rt-transit-id').value = transitId;
+  document.getElementById('rt-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('rt-reason').value = '';
+  document.getElementById('rt-info').innerHTML =
+    '<div class="fw-semibold">' + escHtml(t.product_name || t.ean || '?') + '</div>'
+    + '<div class="text-muted" style="font-size:.8rem">'
+    + parseFloat(t.qty_cartons).toFixed(1) + ' 箱　'
+    + escHtml(t.from_location || '') + ' &#8594; ' + escHtml(t.to_location || '')
+    + (t.tracking_no ? '　' + escHtml(t.tracking_no) : '') + '</div>';
+  getModal('returnModal').show();
+}
+
+function returnTransitAction() {
+  var btn = document.getElementById('rt-save-btn');
+  if (btn && btn.disabled) return;
+  var id   = parseInt(document.getElementById('rt-transit-id').value);
+  var when = document.getElementById('rt-date').value;
+  if (!when) { showToast('請填退回日期', 'error'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = '處理中…'; }
+  function resetBtn() { if (btn) { btn.disabled = false; btn.textContent = '確認退回'; } }
+  gasCall2('returnTransit', id, {
+    returned_date: when,
+    reason: document.getElementById('rt-reason').value.trim()
+  }, function(r) {
+    resetBtn();
+    getModal('returnModal').hide();
+    showToast(r && r.returned
+      ? '已退回，' + r.returned + ' 箱補回 ' + (r.returnedTo || '來源倉')
+      : '已標記為退回', 'success');
+    syncData();
+  }, function(e) { resetBtn(); showToast('退回失敗：' + e, 'error'); });
 }
 
 function markArriving(transitId) {

@@ -676,6 +676,63 @@ function markTransitArriving(transitId) {
   } catch(e) { return { error: e.message }; }
 }
 
+// 整批退回來源倉（報關不過、地址錯誤、快遞退件…）。
+// 與 deleteTransit 的差別：紀錄保留下來、狀態轉 RETURNED，可追溯這批貨發生過什麼事。
+// 箱數補回來源倉，備註寫「在途退回 #id」，與出發時的扣除對稱。
+function returnTransit(transitId, d) {
+  try {
+    var tSheet = ss_().getSheetByName('Transits');
+    if (!tSheet) return { error: 'Transits sheet not found' };
+    var row = findRow_(tSheet, transitId);
+    if (row < 0) return { error: 'Transit not found' };
+
+    var hdr  = ensureTransitColumns_(tSheet);
+    var vals = tSheet.getRange(row, 1, 1, hdr.length).getValues()[0];
+    function col(name) { var i = hdr.indexOf(name); return i < 0 ? '' : vals[i]; }
+    function setCol(name, v) {
+      var i = hdr.indexOf(name);
+      if (i >= 0) tSheet.getRange(row, i + 1).setValue(v);
+    }
+
+    var status = String(col('status') || '').toUpperCase();
+    if (status === 'ARRIVED') {
+      return { error: '已到貨的紀錄不能改成退回：貨已入目的倉，那是另一筆反方向的出貨。' };
+    }
+    if (status === 'RETURNED') return { error: '這筆已經是退回狀態了' };
+
+    var qty     = Math.abs(parseFloat(col('qty_cartons')) || 0);
+    var fromLoc = String(col('from_location') || 'TW');
+    var when    = (d && d.returned_date) || formatDate_(new Date());
+    var reason  = (d && String(d.reason || '').trim()) || '';
+
+    if (qty > 0) {
+      var entry = {
+        date:     when,
+        ean:      String(col('ean')          || ''),
+        name:     String(col('product_name') || ''),
+        sku:      String(col('sku')          || ''),
+        exp_date: String(col('exp_date')     || ''),
+        boxes:    qty,
+        note:     '在途退回 #' + transitId + (reason ? '：' + reason : '')
+      };
+      if (fromLoc.toUpperCase() === 'TW') {
+        addTaiwanEntry(entry);
+      } else {
+        entry.location = fromLoc;
+        addMovementEntry(entry);
+      }
+    }
+
+    setCol('status', 'RETURNED');
+    setCol('arrived_date', when);   // 這一欄在退回時代表結案日期
+    if (reason) {
+      var old = String(col('note') || '');
+      setCol('note', (old ? old + ' / ' : '') + '退回：' + reason);
+    }
+    return { ok: true, returned: qty, returnedTo: fromLoc };
+  } catch(e) { return { error: e.message }; }
+}
+
 // 一次建立多筆在途：同一批出貨常常有好幾種產品，共用出發日／ETA／追蹤號。
 // 逐筆從前端呼叫會來回好幾趟又容易中途斷掉（台灣倉匯入就是這樣才改成批次的）。
 // 內部仍走 addTransit，庫存扣除的邏輯只留一份，不重複實作。
@@ -799,6 +856,29 @@ function testTransitTracking() {
     check('刪除後台灣倉回補 2 箱', twSum() === twBase, '實際=' + twSum());
     check('海外倉未受影響', ovSum() === 3, '實際=' + ovSum());
 
+    // 8. 整批退回：紀錄保留、箱數補回來源倉
+    var res3 = addTransit({
+      ean: TEST_TRANSIT_EAN_, product_name: '【測試】請忽略', sku: 'TEST-SKU',
+      from_location: 'TW', to_location: 'AMZLGS',
+      qty_cartons: 4, ship_date: '2026-09-04', note: '自動測試-退回'
+    });
+    var id3 = res3 && res3.id;
+    check('第三筆在途建立成功', !!id3, JSON.stringify(res3));
+    check('台灣倉再扣 4 箱', twSum() === twBase - 4, '實際=' + twSum());
+
+    var rr = returnTransit(id3, { returned_date: '2026-09-10', reason: '測試退回' });
+    check('returnTransit 成功', !!(rr && rr.ok), JSON.stringify(rr));
+    check('退回後台灣倉補回 4 箱', twSum() === twBase, '實際=' + twSum());
+    check('退回沒有寫進海外倉', ovSum() === 3, '實際=' + ovSum());
+    var r3 = readSheet_('Transits').filter(function(x){ return x.id == id3; })[0] || {};
+    check('狀態轉為 RETURNED', r3.status === 'RETURNED', '實際=' + r3.status);
+    check('紀錄保留未被刪除', !!r3.id);
+
+    // 已退回的再刪一次會重複退補，庫存憑空變多 —— 必須被擋下
+    var dr3 = deleteTransit(id3);
+    check('已退回的紀錄擋下刪除', !!(dr3 && dr3.error), JSON.stringify(dr3));
+    check('擋下後沒有重複退補', twSum() === twBase, '實際=' + twSum());
+
   } catch(e) {
     say('❌ 測試中斷：' + e.message);
   } finally {
@@ -888,6 +968,10 @@ function deleteTransit(id) {
     // 已到貨的紀錄兩邊庫存都寫過了，直接刪會讓帳目對不起來，也毀掉可追溯的軌跡
     if (status === 'ARRIVED') {
       return { error: '已到貨的紀錄不可刪除：來源倉與目的倉的異動都已寫入。如需更正請手動調整庫存。' };
+    }
+    // 已退回的紀錄早就退補過來源倉，再刪一次會重複退補、庫存憑空變多
+    if (status === 'RETURNED') {
+      return { error: '已退回的紀錄不可刪除：箱數在退回時就已經補回來源倉，再刪會重複計算。' };
     }
 
     if (qty > 0) {
