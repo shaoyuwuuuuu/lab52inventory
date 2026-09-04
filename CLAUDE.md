@@ -117,6 +117,18 @@ clasp deploy --deploymentId <ID> --description "..."   # 網頁應用程式才�
 **動到 `index.html` 一定要 deploy**，因為網頁應用程式是綁版本的，只 push 不會生效。
 純後端改動（同步邏輯、診斷、通知）只要 push 即可。
 
+**前端改動請累積起來一次部署。** 每次 deploy 會消耗一個版本號，上限 200 個。
+
+### 撞到「Script has reached the limit of 200 versions」時
+
+- **版本（version）與部署（deployment）是兩回事**，額度各自獨立。
+  刪部署**不會**釋出版本額度（已實測）。
+- **版本無法用程式刪除**：官方 `projects.versions` API 只有 create / get / list，
+  沒有 delete，所以 clasp 也做不到。
+- **只能由人到 Apps Script 編輯器左側「專案歷程記錄」手動刪除舊版本。**
+- 部署數量本身沒有這個問題，但 `clasp undeploy <id>` 可以清掉沒在用的舊部署
+  （2026-09-04 曾從 21 個清到 2 個：保留正式的 `@…jwXQg` 與一個 `@HEAD`）。
+
 ## 開發慣例
 - 前端無建置流程，`node --check` 逐一檢查 `index.html` 的三個 inline `<script>` 區塊即可
 - 欄位新增一律加在 `FBA_HDR_` 尾端（保留日均銷量的邏輯是按欄位**名稱**查找的）
