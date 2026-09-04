@@ -828,6 +828,18 @@ function addTransitBatch(d) {
 //
 // 注意兩者的庫存語意不同：手動在途從來沒有真的扣過台灣倉（只是畫面上的減項），
 // 正式在途會真的扣。所以搬遷後台灣倉的數字會下降，但「扣除後」看到的可用量不變。
+// 使用者於 2026-09-04 確認的正確在途清單。
+// 刻意不沿用 Shared 裡的 manual_transit_*：那份有三處與實際不符
+//（草莓+桃子的產品與數量、以及缺少清新噴霧）。
+var MANUAL_TRANSIT_MIGRATION_ = [
+  { asin: 'B0B5QWQ7PP', qty: 15, label: '香草噴霧'   },
+  { asin: 'B0F6T1FCZD', qty: 10, label: '原味噴霧'   },
+  { asin: 'B0DBTTVWB4', qty: 10, label: '草莓+香草' },
+  { asin: 'B0DBT8RDPJ', qty: 20, label: '草莓+桃子' },
+  { asin: 'B0GK66X2RN', qty:  5, label: '清新噴霧'   },
+  { asin: 'B0C9T4XCJF', qty: 10, label: '三入葡萄'   }
+];
+
 function previewManualTransitMigration() { return manualTransitMigration_(true); }
 function runManualTransitMigration()     { return manualTransitMigration_(false); }
 
@@ -854,28 +866,45 @@ function manualTransitMigration_(dryRun) {
       });
     }
 
-    // 2. 手動在途 → 一批正式在途
-    var prodByEan = {};
-    readProducts_().forEach(function(p) { if (p.ean) prodByEan[p.ean] = p; });
+    // 2. 依使用者確認的清單建立一批正式在途（以 ASIN 對應產品）
+    var prodByAsin = {};
+    var products = readProducts_();
+    products.forEach(function(p) { if (p.asin) prodByAsin[String(p.asin).trim()] = p; });
 
-    var shared = readShared_();
-    var pre = 'manual_transit_';
-    var items = [], keys = [];
-    Object.keys(shared).forEach(function(k) {
-      if (k.indexOf(pre) !== 0) return;
-      var qty = parseFloat(shared[k]) || 0;
-      if (qty <= 0) return;
-      var ean = k.slice(pre.length);
-      var p = prodByEan[ean] || {};
-      items.push({ ean: ean, product_name: p.name || ean, sku: p.sku || '', qty_cartons: qty });
-      keys.push(k);
+    // 刪除步驟已經把測試在途的箱數退回台灣倉，所以這裡要重讀才是正確的餘額
+    var twByEan = {};
+    readTaiwanMovements_().forEach(function(m) {
+      twByEan[m.ean] = (twByEan[m.ean] || 0) + (parseFloat(m.boxes) || 0);
     });
+
+    var items = [], missing = [];
+    MANUAL_TRANSIT_MIGRATION_.forEach(function(x) {
+      var p = prodByAsin[x.asin];
+      if (!p || !p.ean) { missing.push(x); return; }
+      items.push({ ean: p.ean, product_name: p.name || x.label, sku: p.sku || '',
+                   qty_cartons: x.qty, _tw: twByEan[p.ean] || 0, _label: x.label });
+    });
+
+    if (missing.length) {
+      say('[2] ★ 有 ' + missing.length + ' 個 ASIN 在庫存總覽找不到，為避免只搬一半，全部中止：');
+      missing.forEach(function(x) { say('    ' + x.label + '　' + x.asin); });
+      say('=== 已中止，沒有建立任何在途 ===');
+      return out.join('\n');
+    }
+
     var total = items.reduce(function(n, x) { return n + x.qty_cartons; }, 0);
     say('[2] 將建立的在途：' + items.length + ' 筆，共 ' + (Math.round(total * 10) / 10)
         + ' 箱（同一批，TW → AMZLGS，出發日留空）');
     items.forEach(function(it) {
-      say('    ' + it.product_name + '　' + it.qty_cartons + ' 箱');
+      var left = Math.round((it._tw - it.qty_cartons) * 10) / 10;
+      say('    ' + it._label + '　' + it.qty_cartons + ' 箱　台灣倉 ' + it._tw
+          + ' → ' + left + (left < 0 ? '　★ 台灣倉會變負數 ★' : ''));
     });
+
+    // Shared 裡的舊手動在途一律清掉：那份數字已被這份取代，留著會重複計算
+    var shared = readShared_();
+    var pre = 'manual_transit_';
+    var keys = Object.keys(shared).filter(function(k) { return k.indexOf(pre) === 0; });
 
     if (!dryRun && items.length) {
       var res = addTransitBatch({
