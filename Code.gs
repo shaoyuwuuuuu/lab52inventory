@@ -847,6 +847,28 @@ var MANUAL_TRANSIT_MIGRATION_ = [
   { asin: 'B0C9T4XCJF', qty: 10, label: '三入葡萄'   }
 ];
 
+// 搬遷時每筆都被寫了「由手動在途轉入」，清單上看起來很雜。
+// 執行一次即可清掉，只動這句完全相符的備註，使用者自己寫的不受影響。
+function clearMigrationNotes() {
+  try {
+    var sh = ss_().getSheetByName('Transits');
+    if (!sh || sh.getLastRow() < 2) return { ok: true, cleared: 0 };
+    var hdr = ensureTransitColumns_(sh);
+    var iNote = hdr.indexOf('note');
+    if (iNote < 0) return { error: '找不到 note 欄位' };
+    var vals = sh.getRange(2, iNote + 1, sh.getLastRow() - 1, 1).getValues();
+    var n = 0;
+    vals.forEach(function(r, i) {
+      if (String(r[0] || '').trim() === '由手動在途轉入') {
+        sh.getRange(i + 2, iNote + 1).setValue('');
+        n++;
+      }
+    });
+    Logger.log('已清除 ' + n + ' 筆「由手動在途轉入」備註');
+    return { ok: true, cleared: n };
+  } catch(e) { return { error: e.message }; }
+}
+
 function previewManualTransitMigration() { return manualTransitMigration_(true); }
 function runManualTransitMigration()     { return manualTransitMigration_(false); }
 

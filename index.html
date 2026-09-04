@@ -275,22 +275,6 @@ tr:hover .prod-actions{opacity:1}
       <div id="fba-restock-table"></div>
     </div>
 
-    <!-- 手動在途 -->
-    <div class="card mb-3">
-      <div class="px-3 pt-3 pb-2 d-flex align-items-center justify-content-between gap-2">
-        <span class="fw-bold" style="font-size:.88rem;color:var(--text2);white-space:nowrap"><i class="bi bi-truck me-1" style="color:#1E7BC4"></i>手動在途（TW → FBA / 外倉）</span>
-        <span class="text-muted" style="font-size:.75rem;white-space:nowrap">輸入已從台灣倉出發、尚未到貨的箱數</span>
-      </div>
-      <!-- 這欄只是顯示用的減項，不會寫任何異動紀錄；正式出貨請改用在途貨物追蹤 -->
-      <div class="px-3 pb-2">
-        <span class="text-muted" style="font-size:.72rem;line-height:1.5">
-          <i class="bi bi-info-circle me-1"></i>此欄<strong>不會自動記帳</strong>：到貨時要自己扣台灣倉、加海外倉，再把這裡歸零。
-          正式出貨請用「<strong>在途貨物追蹤</strong>」，它出發時自動扣來源倉、到貨時自動加目的倉，不會漏帳。
-        </span>
-      </div>
-      <div id="manual-transit-table"></div>
-    </div>
-
     <!-- 採購生產建議 -->
     <div class="card mb-3">
       <div class="px-3 pt-3 pb-2 d-flex align-items-center justify-content-between gap-2">
@@ -1043,7 +1027,7 @@ function applyData(data) {
     if (data.transits  !== undefined) S.transits  = toArr(data.transits);
     if (data.fba       !== undefined) S.fba       = toArr(data.fba);
     if (data.shared    !== undefined) S.shared    = data.shared || {};
-    rebuildManualTransit();
+
     migrateLocalToShared();
     var _compCount = S.products.filter(function(p){ return p.components; }).length;
     console.log('[applyData] S.products:', S.products.length, '| 有組件資料:', _compCount, '| 範例:', JSON.stringify((S.products[0]||{}).components));
@@ -1315,38 +1299,48 @@ function renderDashboard() {
         var first = g.items[0];
         var boxes = g.items.reduce(function(n, x){ return n + (parseFloat(x.qty_cartons) || 0); }, 0);
         var trk   = String(first.tracking_no || '').trim();
-        var head  = '<div class="px-3 py-1 d-flex flex-wrap align-items-center gap-2 border-bottom"'
-          + ' style="background:var(--bg3);font-size:.74rem">'
-          + '<span class="fw-semibold">'
+        // 批次標題：左側粗色條 + 較大字，讓「這是一批」在掃視時立刻成立
+        var head  = '<div class="d-flex flex-wrap align-items-center gap-2 px-3 py-2"'
+          + ' style="background:var(--bg3);border-left:4px solid #1E7BC4">'
+          + '<span class="fw-bold" style="font-size:.86rem">'
+          + '<i class="bi bi-box-seam me-1" style="color:#1E7BC4"></i>'
           + (first.ship_date ? escHtml(first.ship_date) + ' 出貨' : '未填出發日') + '</span>'
-          + '<span class="text-muted">' + escHtml(first.from_location || '') + ' &#8594; '
-          + escHtml(first.to_location || '') + '</span>'
-          + '<span class="text-muted">' + g.items.length + ' 項 / '
-          + (Math.round(boxes * 10) / 10) + ' 箱</span>'
-          + (first.eta_date ? '<span class="text-muted">ETA ' + escHtml(first.eta_date) + '</span>' : '')
+          + '<span class="text-muted" style="font-size:.76rem">'
+          + escHtml(first.from_location || '') + ' &#8594; ' + escHtml(first.to_location || '')
+          + '</span>'
+          + (first.eta_date
+              ? '<span class="text-muted" style="font-size:.76rem">ETA ' + escHtml(first.eta_date) + '</span>'
+              : '')
           + (trk
               ? '<a href="' + trackingUrl(trk) + '" target="_blank" rel="noopener"'
-                + ' style="font-family:monospace">' + escHtml(trk) + '</a>'
-              : '<span class="text-muted">無追蹤號</span>')
+                + ' style="font-size:.76rem;font-family:monospace">' + escHtml(trk) + '</a>'
+              : '<span class="text-muted" style="font-size:.76rem">無追蹤號</span>')
+          + '<span class="ms-auto fw-bold" style="font-size:.86rem;white-space:nowrap">'
+          + g.items.length + ' 項　' + (Math.round(boxes * 10) / 10) + ' 箱</span>'
           + '</div>';
 
         return head + g.items.map(function(t) {
           var overdue  = t.eta_date && t.eta_date < today0;
           var arriving = t.status === 'ARRIVING';
-          return '<div class="d-flex align-items-center justify-content-between border-bottom px-3 py-2 gap-2"'
+          return '<div class="d-flex align-items-center border-bottom px-3 py-2 gap-2"'
             + (arriving ? ' style="background:var(--warn-bg)"' : '') + '>'
             + '<div style="flex:1;min-width:0">'
             + (arriving ? '<span class="badge bg-warning me-1" style="font-size:.65rem">待確認到貨</span>' : '')
             + '<span class="fw-semibold" style="font-size:.85rem">'
             + escHtml(t.product_name || t.ean || '?') + '</span>'
-            + ' <span class="text-muted" style="font-size:.75rem">'
-            + parseFloat(t.qty_cartons).toFixed(1) + ' 箱'
-            + (t.tracking_status ? ' · ' + escHtml(t.tracking_status) : '') + '</span>'
             + (overdue && !arriving
                 ? ' <span class="badge bg-danger ms-1" style="font-size:.65rem">逾期</span>' : '')
+            + (t.tracking_status
+                ? '<div class="text-muted" style="font-size:.72rem">' + escHtml(t.tracking_status) + '</div>'
+                : '')
             + (t.note ? '<div class="text-muted" style="font-size:.72rem;margin-top:2px">'
                       + '<i class="bi bi-sticky me-1"></i>' + escHtml(t.note) + '</div>' : '')
             + '</div>'
+            // 箱數獨立成固定寬度的右對齊欄，才掃得出來 —— 混在品名後面很難讀
+            + '<div style="width:76px;text-align:right;white-space:nowrap">'
+            + '<span class="fw-bold" style="font-size:.95rem">'
+            + parseFloat(t.qty_cartons).toFixed(1) + '</span>'
+            + '<span class="text-muted" style="font-size:.72rem"> 箱</span></div>'
             + '<div class="d-flex gap-1" style="white-space:nowrap">'
             + '<button class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size:.75rem"'
             + ' title="編輯箱數／日期／追蹤號／備註" onclick="openEditTransitModal(' + t.id + ')">'
@@ -1431,18 +1425,11 @@ function renderDashboard() {
     // 與 FBA 表格同口徑（可出貨 + 入庫中，不含預留）——預留裡最大一塊是買家訂單，
     // 那些已經賣掉即將離開，算成庫存會高估水位、導致少生產
     var fbaQty        = fba ? fbaAvailQty(fba) : 0;
-    var twBoxes       = twBoxByEan[p.ean] || 0;
-    var transitBoxes  = _manualTransit[p.ean] || 0;
-    var overseasBoxes = overseasBoxByEan[p.ean] || 0;
-    var twQty         = Math.max(0, twBoxes - transitBoxes) * qpc;
-    // 在途主要送外倉，Amazon 看不到、外倉分頁也還沒收到，不加回來就等於憑空消失。
-    // 用 min 夾住：在途填得比台灣倉多時不會無中生有，twQty + transitQty 恆等於台灣倉總量。
-    var transitQty    = Math.min(twBoxes, transitBoxes) * qpc;
-    // Transits 的貨已從來源倉扣掉，加回來不會重複；
-    // 手動在途則是「台灣倉還沒扣」，靠上面的 min 補回缺口，兩者可並存
-    var trackedQty    = (trackedTransitByEan[p.ean] || 0) * qpc;
-    var overseasQty   = overseasBoxes * qpc;
-    var totalQty    = fbaQty + twQty + transitQty + trackedQty + overseasQty;
+    var twQty         = (twBoxByEan[p.ean]       || 0) * qpc;
+    var overseasQty   = (overseasBoxByEan[p.ean] || 0) * qpc;
+    // 在途的貨建立時已從來源倉扣掉，加回來不會重複；不加就等於在海上那段期間憑空消失
+    var transitQty    = (trackedTransitByEan[p.ean] || 0) * qpc;
+    var totalQty    = fbaQty + twQty + transitQty + overseasQty;
     var totalDays   = daily > 0 ? Math.round(totalQty / daily) : null;
     var months      = totalDays !== null ? Math.round(totalDays / 30 * 10) / 10 : null;
     var sufficient  = daily > 0 && months !== null && months >= PROD_MONTHS;
@@ -1455,12 +1442,11 @@ function renderDashboard() {
       totalQty: Math.round(totalQty),
       fbaQty: Math.round(fbaQty),
       twQty: Math.round(twQty),
-      transitQty: Math.round(transitQty + trackedQty),
+      transitQty: Math.round(transitQty),
       overseasQty: Math.round(overseasQty),
       totalDays: totalDays, months: months, prodBoxes: prodBoxes, sufficient: sufficient
     });
   });
-  renderManualTransit();
   renderProdSuggest();
 }
 
@@ -2662,59 +2648,6 @@ function undoTaiwanImport() {
   });
 }
 
-function renderManualTransit() {
-  var el = document.getElementById('manual-transit-table');
-  if (!el) return;
-
-  var twBoxByEan = {};
-  (S.taiwan || []).forEach(function(m) {
-    twBoxByEan[m.ean] = (twBoxByEan[m.ean] || 0) + (parseFloat(m.boxes) || 0);
-  });
-
-  var prods = (S.products || []).filter(function(p) {
-    return (twBoxByEan[p.ean] || 0) > 0 || (_manualTransit[p.ean] || 0) > 0;
-  });
-
-  if (!prods.length) {
-    el.innerHTML = '<p class="text-muted small px-3 pb-3 mb-0">台灣倉無庫存</p>';
-    return;
-  }
-
-  el.innerHTML = '<div class="table-responsive"><table class="table table-sm table-hover mb-0">'
-    + '<thead><tr><th>產品</th><th>EAN</th>'
-    + '<th style="text-align:right">台灣倉(箱)</th>'
-    + '<th style="text-align:right;color:#1E7BC4">在途(箱)</th>'
-    + '<th style="text-align:right">扣除後(箱)</th></tr></thead><tbody>'
-    + prods.map(function(p) {
-        var twBox    = Math.round((twBoxByEan[p.ean] || 0) * 10) / 10;
-        var transit  = _manualTransit[p.ean] || 0;
-        var remain   = Math.round(Math.max(0, twBox - transit) * 10) / 10;
-        var warnClr  = transit > 0 ? 'color:var(--warn-text);font-weight:600' : '';
-        return '<tr>'
-          + '<td class="fw-semibold" style="font-size:.83rem">' + escHtml(p.name) + '</td>'
-          + '<td class="text-muted small">' + escHtml(p.ean) + '</td>'
-          + '<td style="text-align:right">' + twBox + '</td>'
-          + '<td style="text-align:right">'
-          +   '<input type="number" min="0" step="1" value="' + (transit || '') + '" placeholder="0"'
-          +   ' style="width:72px;text-align:right;border:1px solid var(--border);border-radius:4px;'
-          +   'padding:2px 6px;background:var(--bg2);color:var(--text);font-size:.8rem"'
-          +   ' onchange="saveManualTransit(\'' + p.ean + '\',this.value)">'
-          + '</td>'
-          + '<td style="text-align:right;' + warnClr + '">' + remain + '</td>'
-          + '</tr>';
-      }).join('')
-    + '</tbody></table></div>';
-}
-
-// 手動在途與儀表板備註都改存到 Google Sheets 的 Shared 分頁，換裝置才看得到。
-// 先更新本地狀態再送出，畫面不必等網路來回。
-function saveManualTransit(ean, val) {
-  var v = Math.max(0, parseFloat(val) || 0);
-  if (v === 0) delete _manualTransit[ean];
-  else _manualTransit[ean] = v;
-  setSharedValue('manual_transit_' + ean, v === 0 ? '' : v);
-  renderDashboard();
-}
 
 function saveDashboardNote(el) {
   var key = el.getAttribute('data-nk');
@@ -2731,30 +2664,15 @@ function setSharedValue(key, value) {
   });
 }
 
-// _manualTransit 改由 Shared 的 manual_transit_<ean> 重建，每次收到資料就刷新
-function rebuildManualTransit() {
-  _manualTransit = {};
-  var pre = 'manual_transit_';
-  Object.keys(S.shared || {}).forEach(function(k) {
-    if (k.indexOf(pre) !== 0) return;
-    var v = parseFloat(S.shared[k]) || 0;
-    if (v > 0) _manualTransit[k.slice(pre.length)] = v;
-  });
-}
 
 // 一次性搬遷：舊資料只存在本機。只補雲端還沒有的 key，不覆蓋別台裝置填好的值。
 var _migratedShared = false;
 function migrateLocalToShared() {
   if (_migratedShared || !GAS_MODE) return;
   _migratedShared = true;
+  // 只搬儀表板備註。手動在途已於 2026-09-04 併入正式在途並移除功能，
+  // 若還把本機殘留的值搬回雲端，那些已清掉的舊資料會復活並重複計算。
   var pairs = [];
-  try {
-    var mt = JSON.parse(localStorage.getItem('lab52_manual_transit') || '{}');
-    Object.keys(mt).forEach(function(ean) {
-      var k = 'manual_transit_' + ean;
-      if (mt[ean] && S.shared[k] === undefined) pairs.push({ key: k, value: mt[ean] });
-    });
-  } catch(e) {}
   for (var i = 0; i < localStorage.length; i++) {
     var lk = localStorage.key(i);
     if (!lk) continue;
@@ -3104,12 +3022,6 @@ var _colResizing = false;
 var _prodRows = [];
 var _prodSort = null; // null = original order, 'urgency' = red→yellow→green
 var _restockRows = [];
-// 首次載入前先用本機的舊值墊著，資料一回來就由 rebuildManualTransit() 換成雲端版本。
-// 舊值只在 migrateLocalToShared() 搬遷時還會用到，之後即以 Shared 分頁為準。
-var _manualTransit = (function() {
-  try { return JSON.parse(localStorage.getItem('lab52_manual_transit') || '{}'); }
-  catch(e) { return {}; }
-})();
 
 var PROD_COLS = [
   {id:'name',   label:'產品名稱'},
