@@ -580,29 +580,58 @@ function updateTaiwanNote(d) {
 //       qty_cartons, exp_date, ship_date, eta_date, status,
 //       arrived_date, note, created_at
 
+// ── 在途追蹤欄位 ─────────────────────────────────────────────────────────────
+// 一律加在 Transits 尾端。注意：絕對不要用 setupSheets() 來加欄位，
+// 那支會 deleteSheet 再 insertSheet，整張在途紀錄會被清光。
+var TRANSIT_TRACK_COLS_ = ['tracking_no', 'carrier', 'tracking_status', 'tracking_checked_at'];
+
+function ensureTransitColumns_(sheet) {
+  var lastCol = sheet.getLastColumn();
+  var hdr = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+    .map(function(h) { return String(h).trim(); });
+  var missing = TRANSIT_TRACK_COLS_.filter(function(c) { return hdr.indexOf(c) < 0; });
+  if (!missing.length) return hdr;
+  var need = lastCol + missing.length;
+  if (sheet.getMaxColumns() < need) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), need - sheet.getMaxColumns());
+  }
+  sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing])
+    .setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff');
+  return hdr.concat(missing);
+}
+
 function addTransit(d) {
   try {
     var tSheet = ss_().getSheetByName('Transits');
     if (!tSheet) return { error: 'Transits sheet not found' };
+    var hdr = ensureTransitColumns_(tSheet);
     var id  = nextId_('Transits');
     var qty = Math.abs(parseFloat(d.qty_cartons) || 0);
     var fromLoc = d.from_location || 'TW';
-    insertAtTop_(tSheet, [
-      id,
-      d.ean           || '',
-      d.product_name  || '',
-      d.sku           || '',
-      fromLoc,
-      d.to_location   || 'AMZLGS',
-      qty,
-      d.exp_date      || '',
-      d.ship_date     || '',
-      d.eta_date      || '',
-      'TRANSIT',
-      '',
-      d.note          || '',
-      nowStr_()
-    ]);
+    // 依標題名稱組列，欄位順序日後調整也不會錯位
+    var vals = {
+      id: id,
+      ean:           d.ean          || '',
+      product_name:  d.product_name || '',
+      sku:           d.sku          || '',
+      from_location: fromLoc,
+      to_location:   d.to_location  || 'AMZLGS',
+      qty_cartons:   qty,
+      exp_date:      d.exp_date     || '',
+      ship_date:     d.ship_date    || '',
+      eta_date:      d.eta_date     || '',
+      status:        'TRANSIT',
+      arrived_date:  '',
+      note:          d.note         || '',
+      created_at:    nowStr_(),
+      tracking_no:        String(d.tracking_no || '').trim(),
+      carrier:            String(d.carrier     || '').trim(),
+      tracking_status:    '',
+      tracking_checked_at: ''
+    };
+    insertAtTop_(tSheet, hdr.map(function(h) {
+      return vals[h] !== undefined ? vals[h] : '';
+    }));
     if (fromLoc === 'TW') {
       addTaiwanEntry({
         date:     d.ship_date,
@@ -627,6 +656,23 @@ function addTransit(d) {
       });
     }
     return { ok: true, id: id };
+  } catch(e) { return { error: e.message }; }
+}
+
+// 標記為「待確認到貨」。階段一由人手動按，階段二改由每日輪詢自動設定。
+// 這支不寫任何庫存 —— 入庫一律走 confirmArrival()，因為快遞的「已送達」
+// 只代表送到倉庫門口，不等於海外倉已經點收入帳。
+function markTransitArriving(transitId) {
+  try {
+    var sh = ss_().getSheetByName('Transits');
+    if (!sh) return { error: 'Transits sheet not found' };
+    var row = findRow_(sh, transitId);
+    if (row < 0) return { error: 'Transit not found' };
+    var hdr = ensureTransitColumns_(sh);
+    var iStatus = hdr.indexOf('status');
+    if (iStatus < 0) return { error: '找不到 status 欄位' };
+    sh.getRange(row, iStatus + 1).setValue('ARRIVING');
+    return { ok: true };
   } catch(e) { return { error: e.message }; }
 }
 

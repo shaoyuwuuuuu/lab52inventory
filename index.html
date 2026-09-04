@@ -747,6 +747,16 @@ tr:hover .prod-actions{opacity:1}
             <label class="form-label small">預計到貨（ETA）</label>
             <input type="date" class="form-control form-control-sm" id="tr-eta">
           </div>
+          <div class="col-8">
+            <label class="form-label small">追蹤號</label>
+            <input type="text" class="form-control form-control-sm" id="tr-tracking-no"
+                   placeholder="海運沒有就留空">
+          </div>
+          <div class="col-4">
+            <label class="form-label small">業者</label>
+            <input type="text" class="form-control form-control-sm" id="tr-carrier"
+                   placeholder="選填">
+          </div>
           <div class="col-12">
             <label class="form-label small">備注</label>
             <input type="text" class="form-control form-control-sm" id="tr-note">
@@ -1164,7 +1174,7 @@ function renderDashboard() {
   // 所以採購建議必須把它加回總量，否則貨在海上的那段期間會憑空消失。
   var trackedTransitByEan = {};
   (S.transits || []).forEach(function(t) {
-    if (t.status !== 'TRANSIT') return;
+    if (!isInTransit(t)) return;
     var ean = t.ean || ''; if (!ean) return;
     trackedTransitByEan[ean] = (trackedTransitByEan[ean] || 0) + (parseFloat(t.qty_cartons) || 0);
   });
@@ -1180,7 +1190,7 @@ function renderDashboard() {
 
 
   // ── 在途顯示 ──────────────────────────────────────────────────────────────
-  var activeT = (S.transits || []).filter(function(t) { return t.status === 'TRANSIT'; });
+  var activeT = (S.transits || []).filter(isInTransit);
   var twrap = document.getElementById('active-transits-wrap');
   if (twrap) {
     if (!activeT.length) {
@@ -1476,7 +1486,7 @@ function renderDashboard_OLD_UNUSED() {
 
   // In-transit by EAN
   var transitByEan = {};
-  S.transits.filter(function(t){ return t.status === 'TRANSIT'; }).forEach(function(t) {
+  S.transits.filter(isInTransit).forEach(function(t) {
     var ean = t.ean || '';
     if (!ean) return;
     transitByEan[ean] = (transitByEan[ean] || 0) + (parseFloat(t.qty_cartons) || 0);
@@ -1527,8 +1537,11 @@ function renderDashboard_OLD_UNUSED() {
   tHtml += '</tbody></table></div>';
   document.getElementById('product-stock-overview').innerHTML = tHtml;
 
-  // Active transits
-  var activeT = S.transits.filter(function(t){ return t.status === 'TRANSIT'; });
+  // Active transits（含 ARRIVING：貨到了但還沒點收入帳，仍算在途）
+  var activeT = S.transits.filter(isInTransit).slice()
+    .sort(function(a, b) {   // 待確認的排最上面，那是需要你動手的
+      return (b.status === 'ARRIVING' ? 1 : 0) - (a.status === 'ARRIVING' ? 1 : 0);
+    });
   var twrap = document.getElementById('active-transits-wrap');
   if (twrap) {
     if (!activeT.length) {
@@ -1537,17 +1550,32 @@ function renderDashboard_OLD_UNUSED() {
       twrap.style.display = '';
       var today0 = new Date().toISOString().slice(0,10);
       document.getElementById('active-transits-list').innerHTML = activeT.map(function(t) {
-        var overdue = t.eta_date && t.eta_date < today0;
-        return '<div class="d-flex align-items-center justify-content-between border-bottom px-3 py-2 gap-2">'
+        var overdue  = t.eta_date && t.eta_date < today0;
+        var arriving = t.status === 'ARRIVING';
+        var trk = String(t.tracking_no || '').trim();
+        return '<div class="d-flex align-items-center justify-content-between border-bottom px-3 py-2 gap-2"'
+          + (arriving ? ' style="background:var(--warn-bg)"' : '') + '>'
           + '<div style="flex:1;min-width:0">'
+          + (arriving ? '<span class="badge bg-warning me-1" style="font-size:.65rem">待確認到貨</span>' : '')
           + '<span class="fw-semibold" style="font-size:.85rem">' + escHtml(t.product_name || t.ean || '?') + '</span>'
           + ' <span class="text-muted" style="font-size:.75rem">&#8594; ' + escHtml(t.to_location || '')
           + ' | ' + parseFloat(t.qty_cartons).toFixed(1) + ' 箱'
           + (t.eta_date ? ' | ETA ' + t.eta_date : '') + '</span>'
-          + (overdue ? ' <span class="badge bg-danger ms-1" style="font-size:.65rem">逾期</span>' : '')
+          + (overdue && !arriving ? ' <span class="badge bg-danger ms-1" style="font-size:.65rem">逾期</span>' : '')
+          + (trk ? '<div style="font-size:.72rem;margin-top:2px">'
+                 + '<a href="' + trackingUrl(trk) + '" target="_blank" rel="noopener"'
+                 + ' style="font-family:monospace">' + escHtml(trk) + '</a>'
+                 + (t.tracking_status
+                     ? ' <span class="text-muted">· ' + escHtml(t.tracking_status) + '</span>' : '')
+                 + '</div>' : '')
           + '</div>'
-          + '<button class="btn btn-sm btn-outline-primary py-0" style="font-size:.75rem;white-space:nowrap" onclick="openArrivalModal(' + t.id + ')">確認到貨</button>'
-          + '</div>';
+          + '<div class="d-flex gap-1" style="white-space:nowrap">'
+          + (arriving ? '' :
+              '<button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.75rem"'
+              + ' title="貨到了但還沒點收" onclick="markArriving(' + t.id + ')">已送達</button>')
+          + '<button class="btn btn-sm btn-outline-primary py-0" style="font-size:.75rem"'
+          + ' onclick="openArrivalModal(' + t.id + ')">確認到貨</button>'
+          + '</div></div>';
       }).join('');
     }
   }
@@ -1844,6 +1872,23 @@ function openTransitModal() {
   getModal('transitModal').show();
 }
 
+// ARRIVING（待確認到貨）的貨還沒寫進任何倉，庫存計算上仍然算在途
+function isInTransit(t) { return t.status === 'TRANSIT' || t.status === 'ARRIVING'; }
+
+// 通用查詢頁，不必知道是哪家業者就能點開
+function trackingUrl(no) {
+  return 'https://t.17track.net/en#nums=' + encodeURIComponent(no);
+}
+
+function markArriving(transitId) {
+  gasCall('markTransitArriving', transitId, function() {
+    var t = S.transits.find(function(x){ return x.id == transitId; });
+    if (t) t.status = 'ARRIVING';
+    showToast('已標記為待確認到貨', 'success');
+    syncData();
+  }, function(e) { showToast('標記失敗：' + e, 'error'); });
+}
+
 function saveTransit() {
   var btn = document.getElementById('tr-save-btn');
   if (btn && btn.disabled) return;
@@ -1866,6 +1911,8 @@ function saveTransit() {
     exp_date:      document.getElementById('tr-exp-date').value,
     ship_date:     shipDate,
     eta_date:      document.getElementById('tr-eta').value,
+    tracking_no:   document.getElementById('tr-tracking-no').value.trim(),
+    carrier:       document.getElementById('tr-carrier').value.trim(),
     note:          document.getElementById('tr-note').value.trim()
   };
   if (btn) { btn.disabled = true; btn.textContent = '送出中…'; }
