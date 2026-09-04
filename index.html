@@ -1295,66 +1295,79 @@ function renderDashboard() {
         return hasArriving(b) - hasArriving(a);
       });
 
-      document.getElementById('active-transits-list').innerHTML = groups.map(function(g) {
+      // 用單一表格 + 整列跨欄的批次標題，欄位才會在所有批次之間對齊。
+      // 每批各自一個表格的話，欄寬會依內容各自伸縮，上下就對不起來了。
+      var tHtml = '<div class="table-responsive"><table id="transit-tbl" class="table table-hover mb-0">'
+        + '<thead><tr>'
+        + '<th>產品</th><th>EAN</th><th>SKU</th>'
+        + '<th style="text-align:right">箱數</th>'
+        + '<th>效期</th><th>狀態</th><th>備註</th><th></th>'
+        + '</tr></thead><tbody>';
+
+      groups.forEach(function(g) {
         var first = g.items[0];
         var boxes = g.items.reduce(function(n, x){ return n + (parseFloat(x.qty_cartons) || 0); }, 0);
         var trk   = String(first.tracking_no || '').trim();
-        // 批次標題：左側粗色條 + 較大字，讓「這是一批」在掃視時立刻成立
-        var head  = '<div class="d-flex flex-wrap align-items-center gap-2 px-3 py-2"'
+
+        tHtml += '<tr><td colspan="8" class="py-2"'
           + ' style="background:var(--bg3);border-left:4px solid #1E7BC4">'
           + '<span class="fw-bold" style="font-size:.86rem">'
           + '<i class="bi bi-box-seam me-1" style="color:#1E7BC4"></i>'
           + (first.ship_date ? escHtml(first.ship_date) + ' 出貨' : '未填出發日') + '</span>'
-          + '<span class="text-muted" style="font-size:.76rem">'
-          + escHtml(first.from_location || '') + ' &#8594; ' + escHtml(first.to_location || '')
-          + '</span>'
+          + '<span class="text-muted ms-2" style="font-size:.76rem">'
+          + escHtml(first.from_location || '') + ' &#8594; ' + escHtml(first.to_location || '') + '</span>'
+          + (first.carrier
+              ? '<span class="text-muted ms-2" style="font-size:.76rem">' + escHtml(first.carrier) + '</span>' : '')
           + (first.eta_date
-              ? '<span class="text-muted" style="font-size:.76rem">ETA ' + escHtml(first.eta_date) + '</span>'
-              : '')
+              ? '<span class="text-muted ms-2" style="font-size:.76rem">ETA ' + escHtml(first.eta_date) + '</span>' : '')
           + (trk
-              ? '<a href="' + trackingUrl(trk) + '" target="_blank" rel="noopener"'
+              ? '<a class="ms-2" href="' + trackingUrl(trk) + '" target="_blank" rel="noopener"'
                 + ' style="font-size:.76rem;font-family:monospace">' + escHtml(trk) + '</a>'
-              : '<span class="text-muted" style="font-size:.76rem">無追蹤號</span>')
-          + '<span class="ms-auto fw-bold" style="font-size:.86rem;white-space:nowrap">'
+              : '<span class="text-muted ms-2" style="font-size:.76rem">無追蹤號</span>')
+          + '<span class="float-end fw-bold" style="font-size:.86rem">'
           + g.items.length + ' 項　' + (Math.round(boxes * 10) / 10) + ' 箱</span>'
-          + '</div>';
+          + '</td></tr>';
 
-        return head + g.items.map(function(t) {
+        g.items.forEach(function(t) {
           var overdue  = t.eta_date && t.eta_date < today0;
           var arriving = t.status === 'ARRIVING';
-          return '<div class="d-flex align-items-center border-bottom px-3 py-2 gap-2"'
-            + (arriving ? ' style="background:var(--warn-bg)"' : '') + '>'
-            + '<div style="flex:1;min-width:0">'
-            + (arriving ? '<span class="badge bg-warning me-1" style="font-size:.65rem">待確認到貨</span>' : '')
-            + '<span class="fw-semibold" style="font-size:.85rem">'
-            + escHtml(t.product_name || t.ean || '?') + '</span>'
-            + (overdue && !arriving
-                ? ' <span class="badge bg-danger ms-1" style="font-size:.65rem">逾期</span>' : '')
+          var state = arriving ? '<span class="badge bg-warning">待確認到貨</span>'
+                    : overdue  ? '<span class="badge bg-danger">逾期</span>'
+                               : '<span class="text-muted">在途中</span>';
+          tHtml += '<tr' + (arriving ? ' style="background:var(--warn-bg)"' : '') + '>'
+            + '<td><span class="fw-semibold">' + escHtml(t.product_name || t.ean || '?') + '</span></td>'
+            + '<td><span class="text-muted" style="font-family:monospace;font-size:.8rem">'
+            + escHtml(t.ean || '—') + '</span></td>'
+            + '<td><span class="text-muted" style="font-size:.8rem">' + escHtml(t.sku || '—') + '</span></td>'
+            + '<td style="text-align:right;white-space:nowrap">'
+            + '<span class="fw-bold">' + parseFloat(t.qty_cartons).toFixed(1) + '</span>'
+            + '<span class="text-muted" style="font-size:.75rem"> 箱</span></td>'
+            + '<td><span class="text-muted" style="font-size:.8rem">' + escHtml(t.exp_date || '—') + '</span></td>'
+            + '<td style="white-space:nowrap">' + state
             + (t.tracking_status
-                ? '<div class="text-muted" style="font-size:.72rem">' + escHtml(t.tracking_status) + '</div>'
-                : '')
-            + (t.note ? '<div class="text-muted" style="font-size:.72rem;margin-top:2px">'
-                      + '<i class="bi bi-sticky me-1"></i>' + escHtml(t.note) + '</div>' : '')
-            + '</div>'
-            // 箱數獨立成固定寬度的右對齊欄，才掃得出來 —— 混在品名後面很難讀
-            + '<div style="width:76px;text-align:right;white-space:nowrap">'
-            + '<span class="fw-bold" style="font-size:.95rem">'
-            + parseFloat(t.qty_cartons).toFixed(1) + '</span>'
-            + '<span class="text-muted" style="font-size:.72rem"> 箱</span></div>'
-            + '<div class="d-flex gap-1" style="white-space:nowrap">'
-            + '<button class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size:.75rem"'
-            + ' title="編輯箱數／日期／追蹤號／備註" onclick="openEditTransitModal(' + t.id + ')">'
+                ? '<div class="text-muted" style="font-size:.72rem">' + escHtml(t.tracking_status) + '</div>' : '')
+            + '</td>'
+            + '<td><span class="note-cell" contenteditable="true" data-tr-note="' + t.id + '"'
+            + ' onblur="saveTransitNoteInline(this)"'
+            + ' onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();this.blur()}">'
+            + escHtml(t.note || '') + '</span></td>'
+            + '<td style="white-space:nowrap;text-align:right">'
+            + '<button class="btn btn-sm btn-outline-secondary py-0 px-1 me-1" style="font-size:.75rem"'
+            + ' title="編輯箱數／日期／追蹤號" onclick="openEditTransitModal(' + t.id + ')">'
             + '<i class="bi bi-pencil"></i></button>'
             + (arriving ? ''
-                : '<button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.75rem"'
+                : '<button class="btn btn-sm btn-outline-secondary py-0 me-1" style="font-size:.75rem"'
                   + ' title="貨到了但還沒點收" onclick="markArriving(' + t.id + ')">已送達</button>')
-            + '<button class="btn btn-sm btn-outline-warning py-0" style="font-size:.75rem"'
+            + '<button class="btn btn-sm btn-outline-warning py-0 me-1" style="font-size:.75rem"'
             + ' title="整批退回來源倉" onclick="openReturnModal(' + t.id + ')">退回</button>'
             + '<button class="btn btn-sm btn-outline-primary py-0" style="font-size:.75rem"'
             + ' onclick="openArrivalModal(' + t.id + ')">確認到貨</button>'
-            + '</div></div>';
-        }).join('');
-      }).join('');
+            + '</td></tr>';
+        });
+      });
+      tHtml += '</tbody></table></div>';
+      document.getElementById('active-transits-list').innerHTML = tHtml;
+      makeResizable('transit-tbl');
     }
   }
 
@@ -1929,6 +1942,18 @@ function isInTransit(t) { return t.status === 'TRANSIT' || t.status === 'ARRIVIN
 // 通用查詢頁，不必知道是哪家業者就能點開
 function trackingUrl(no) {
   return 'https://t.17track.net/en#nums=' + encodeURIComponent(no);
+}
+
+// 在途備註行內編輯。只送 note，不帶箱數，所以完全不會觸發庫存調整。
+function saveTransitNoteInline(el) {
+  var id   = parseInt(el.getAttribute('data-tr-note'));
+  var note = el.textContent.trim();
+  var t = S.transits.find(function(x){ return x.id == id; });
+  if (!t || (t.note || '') === note) return;   // 沒改就不送
+  t.note = note;
+  gasCall2('updateTransit', id, { note: note }, null, function(e) {
+    showToast('備註儲存失敗：' + e, 'error');
+  });
 }
 
 function openEditTransitModal(transitId) {
