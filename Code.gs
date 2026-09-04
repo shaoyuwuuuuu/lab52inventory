@@ -680,6 +680,56 @@ function markTransitArriving(transitId) {
   } catch(e) { return { error: e.message }; }
 }
 
+// 編輯在途。日期／追蹤號／備註可自由改；箱數改了要把差額補回或扣掉來源倉，
+// 否則出發時扣的數字就跟紀錄對不上。
+// 只能改在途中的紀錄 —— 已到貨／已退回的兩邊都結清了，事後改會讓帳目錯亂。
+function updateTransit(transitId, d) {
+  try {
+    var tSheet = ss_().getSheetByName('Transits');
+    if (!tSheet) return { error: 'Transits sheet not found' };
+    var row = findRow_(tSheet, transitId);
+    if (row < 0) return { error: 'Transit not found' };
+
+    var hdr  = ensureTransitColumns_(tSheet);
+    var vals = tSheet.getRange(row, 1, 1, hdr.length).getValues()[0];
+    function col(n) { var i = hdr.indexOf(n); return i < 0 ? '' : vals[i]; }
+    function setCol(n, v) { var i = hdr.indexOf(n); if (i >= 0) tSheet.getRange(row, i + 1).setValue(v); }
+
+    var status = String(col('status') || '').toUpperCase();
+    if (status === 'ARRIVED')  return { error: '已到貨的紀錄不可編輯：來源倉與目的倉的異動都已寫入。' };
+    if (status === 'RETURNED') return { error: '已退回的紀錄不可編輯：箱數已經補回來源倉。' };
+
+    d = d || {};
+    ['ship_date', 'eta_date', 'exp_date', 'tracking_no', 'carrier', 'note'].forEach(function(f) {
+      if (d[f] !== undefined) setCol(f, String(d[f] || '').trim());
+    });
+
+    var adjusted = 0;
+    if (d.qty_cartons !== undefined) {
+      var oldQty = Math.abs(parseFloat(col('qty_cartons')) || 0);
+      var newQty = Math.abs(parseFloat(d.qty_cartons)      || 0);
+      var delta  = newQty - oldQty;   // 正 = 出貨變多，來源倉要再扣
+      if (delta !== 0) {
+        var fromLoc = String(col('from_location') || 'TW');
+        var entry = {
+          date:     formatDate_(new Date()),
+          ean:      String(col('ean')          || ''),
+          name:     String(col('product_name') || ''),
+          sku:      String(col('sku')          || ''),
+          exp_date: String(col('exp_date')     || ''),
+          boxes:    -delta,
+          note:     '在途數量調整 #' + transitId + '（' + oldQty + ' → ' + newQty + '）'
+        };
+        if (fromLoc.toUpperCase() === 'TW') addTaiwanEntry(entry);
+        else { entry.location = fromLoc; addMovementEntry(entry); }
+        adjusted = -delta;
+      }
+      setCol('qty_cartons', newQty);
+    }
+    return { ok: true, adjusted: adjusted };
+  } catch(e) { return { error: e.message }; }
+}
+
 // 整批退回來源倉（報關不過、地址錯誤、快遞退件…）。
 // 與 deleteTransit 的差別：紀錄保留下來、狀態轉 RETURNED，可追溯這批貨發生過什麼事。
 // 箱數補回來源倉，備註寫「在途退回 #id」，與出發時的扣除對稱。

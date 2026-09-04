@@ -809,6 +809,57 @@ tr:hover .prod-actions{opacity:1}
   </div>
 </div>
 
+<!-- ── Modal: 編輯在途 ──────────────────────────────────────────────────────── -->
+<div class="modal fade" id="editTransitModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">編輯在途</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="et-info" class="mb-3 p-2" style="background:var(--bg3);border-radius:8px;font-size:.85rem;line-height:1.7;"></div>
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label small fw-semibold">出貨箱數</label>
+            <input type="number" step="0.5" min="0" class="form-control form-control-sm" id="et-qty">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">效期</label>
+            <input type="date" class="form-control form-control-sm" id="et-exp-date">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">出發日期</label>
+            <input type="date" class="form-control form-control-sm" id="et-ship-date">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">預計到貨（ETA）</label>
+            <input type="date" class="form-control form-control-sm" id="et-eta">
+          </div>
+          <div class="col-8">
+            <label class="form-label small">追蹤號</label>
+            <input type="text" class="form-control form-control-sm" id="et-tracking-no">
+          </div>
+          <div class="col-4">
+            <label class="form-label small">業者</label>
+            <input type="text" class="form-control form-control-sm" id="et-carrier">
+          </div>
+          <div class="col-12">
+            <label class="form-label small">備註</label>
+            <input type="text" class="form-control form-control-sm" id="et-note">
+          </div>
+        </div>
+        <input type="hidden" id="et-transit-id">
+        <div id="et-qty-warn" class="mt-2 p-2" style="display:none;background:var(--warn-bg);border-radius:6px;font-size:.78rem;color:var(--warn-text);"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary btn-sm" id="et-save-btn" onclick="saveTransitEdit()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Modal: 在途退回 ──────────────────────────────────────────────────────── -->
 <div class="modal fade" id="returnModal" tabindex="-1">
   <div class="modal-dialog">
@@ -1293,8 +1344,13 @@ function renderDashboard() {
             + (t.tracking_status ? ' · ' + escHtml(t.tracking_status) : '') + '</span>'
             + (overdue && !arriving
                 ? ' <span class="badge bg-danger ms-1" style="font-size:.65rem">逾期</span>' : '')
+            + (t.note ? '<div class="text-muted" style="font-size:.72rem;margin-top:2px">'
+                      + '<i class="bi bi-sticky me-1"></i>' + escHtml(t.note) + '</div>' : '')
             + '</div>'
             + '<div class="d-flex gap-1" style="white-space:nowrap">'
+            + '<button class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size:.75rem"'
+            + ' title="編輯箱數／日期／追蹤號／備註" onclick="openEditTransitModal(' + t.id + ')">'
+            + '<i class="bi bi-pencil"></i></button>'
             + (arriving ? ''
                 : '<button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.75rem"'
                   + ' title="貨到了但還沒點收" onclick="markArriving(' + t.id + ')">已送達</button>')
@@ -1887,6 +1943,66 @@ function isInTransit(t) { return t.status === 'TRANSIT' || t.status === 'ARRIVIN
 // 通用查詢頁，不必知道是哪家業者就能點開
 function trackingUrl(no) {
   return 'https://t.17track.net/en#nums=' + encodeURIComponent(no);
+}
+
+function openEditTransitModal(transitId) {
+  var t = S.transits.find(function(x){ return x.id == transitId; });
+  if (!t) return;
+  document.getElementById('et-transit-id').value  = transitId;
+  document.getElementById('et-qty').value         = parseFloat(t.qty_cartons) || 0;
+  document.getElementById('et-exp-date').value    = t.exp_date    || '';
+  document.getElementById('et-ship-date').value   = t.ship_date   || '';
+  document.getElementById('et-eta').value         = t.eta_date    || '';
+  document.getElementById('et-tracking-no').value = t.tracking_no || '';
+  document.getElementById('et-carrier').value     = t.carrier     || '';
+  document.getElementById('et-note').value        = t.note        || '';
+  document.getElementById('et-info').innerHTML =
+    '<div class="fw-semibold">' + escHtml(t.product_name || t.ean || '?') + '</div>'
+    + '<div class="text-muted" style="font-size:.8rem">'
+    + escHtml(t.from_location || '') + ' &#8594; ' + escHtml(t.to_location || '') + '</div>';
+  document.getElementById('et-qty-warn').style.display = 'none';
+  _etOrigQty = parseFloat(t.qty_cartons) || 0;
+  document.getElementById('et-qty').oninput = updateEditQtyWarn;
+  getModal('editTransitModal').show();
+}
+
+var _etOrigQty = 0;
+
+// 改箱數會連動來源倉的庫存，先講清楚會發生什麼事再讓他存
+function updateEditQtyWarn() {
+  var el = document.getElementById('et-qty-warn');
+  var v  = parseFloat(document.getElementById('et-qty').value);
+  if (isNaN(v) || v === _etOrigQty) { el.style.display = 'none'; return; }
+  var delta = v - _etOrigQty;
+  el.style.display = '';
+  el.innerHTML = '<i class="bi bi-info-circle me-1"></i>箱數從 ' + _etOrigQty + ' 改為 ' + v
+    + '，來源倉會' + (delta > 0 ? '再扣 ' + delta : '補回 ' + (-delta)) + ' 箱';
+}
+
+function saveTransitEdit() {
+  var btn = document.getElementById('et-save-btn');
+  if (btn && btn.disabled) return;
+  var id  = parseInt(document.getElementById('et-transit-id').value);
+  var qty = parseFloat(document.getElementById('et-qty').value);
+  if (isNaN(qty) || qty <= 0) { showToast('箱數要大於 0', 'error'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = '儲存中…'; }
+  function resetBtn() { if (btn) { btn.disabled = false; btn.textContent = '儲存'; } }
+  gasCall2('updateTransit', id, {
+    qty_cartons: qty,
+    exp_date:    document.getElementById('et-exp-date').value,
+    ship_date:   document.getElementById('et-ship-date').value,
+    eta_date:    document.getElementById('et-eta').value,
+    tracking_no: document.getElementById('et-tracking-no').value.trim(),
+    carrier:     document.getElementById('et-carrier').value.trim(),
+    note:        document.getElementById('et-note').value.trim()
+  }, function(r) {
+    resetBtn();
+    getModal('editTransitModal').hide();
+    showToast(r && r.adjusted
+      ? '已更新，來源倉' + (r.adjusted > 0 ? '補回 ' + r.adjusted : '再扣 ' + (-r.adjusted)) + ' 箱'
+      : '已更新', 'success');
+    syncData();
+  }, function(e) { resetBtn(); showToast('更新失敗：' + e, 'error'); });
 }
 
 function openReturnModal(transitId) {
