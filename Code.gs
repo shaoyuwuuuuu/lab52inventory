@@ -1567,7 +1567,9 @@ function setupSalesTrigger() {
 //   3. 執行 removeRestockAlertTrigger() 可取消定時發信
 
 var RESTOCK_ALERT_EMAIL   = 'annicewu@toothfilm.com';
-var RESTOCK_TARGET_DAYS   = 90;   // 低於此天數才發警示
+// 與前端 renderDashboard 的 TARGET_DAYS 必須一致，否則信件裡的建議出貨量
+// 會跟網頁上看到的對不起來（這個常數同時決定發警示的門檻與建議量的算法）
+var RESTOCK_TARGET_DAYS   = 60;   // 低於此天數才發警示
 var RESTOCK_URGENT_DAYS   = 28;   // 低於此天數標記為緊急
 
 function sendRestockAlert() {
