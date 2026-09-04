@@ -1251,15 +1251,18 @@ function renderDashboard() {
     var qpc    = parseFloat(p.qty_per_carton) || 1;
     var fba    = p.asin ? fbaByAsin[p.asin] : null;
     var daily  = fba ? Number(fba['日均銷量'] || 0) : 0;
-    var fbaQty      = fba ? (parseFloat(fba['可出貨數量'] || 0)
-                          + parseFloat(fba['入庫中']    || 0)
-                          + parseFloat(fba['預留數量']  || 0)) : 0;
+    // 與 FBA 表格同口徑（可出貨 + 入庫中，不含預留）——預留裡最大一塊是買家訂單，
+    // 那些已經賣掉即將離開，算成庫存會高估水位、導致少生產
+    var fbaQty        = fba ? fbaAvailQty(fba) : 0;
     var twBoxes       = twBoxByEan[p.ean] || 0;
     var transitBoxes  = _manualTransit[p.ean] || 0;
     var overseasBoxes = overseasBoxByEan[p.ean] || 0;
     var twQty         = Math.max(0, twBoxes - transitBoxes) * qpc;
+    // 在途主要送外倉，Amazon 看不到、外倉分頁也還沒收到，不加回來就等於憑空消失。
+    // 用 min 夾住：在途填得比台灣倉多時不會無中生有，twQty + transitQty 恆等於台灣倉總量。
+    var transitQty    = Math.min(twBoxes, transitBoxes) * qpc;
     var overseasQty   = overseasBoxes * qpc;
-    var totalQty    = fbaQty + twQty + overseasQty;
+    var totalQty    = fbaQty + twQty + transitQty + overseasQty;
     var totalDays   = daily > 0 ? Math.round(totalQty / daily) : null;
     var months      = totalDays !== null ? Math.round(totalDays / 30 * 10) / 10 : null;
     var sufficient  = daily > 0 && months !== null && months >= PROD_MONTHS;
@@ -1272,6 +1275,7 @@ function renderDashboard() {
       totalQty: Math.round(totalQty),
       fbaQty: Math.round(fbaQty),
       twQty: Math.round(twQty),
+      transitQty: Math.round(transitQty),
       overseasQty: Math.round(overseasQty),
       totalDays: totalDays, months: months, prodBoxes: prodBoxes, sufficient: sufficient
     });
@@ -1341,7 +1345,7 @@ function renderProdSuggest() {
     + rows.map(function(r) {
         // 總數量（含 hover breakdown）
         var qtySpan = r.totalQty > 0
-          ? '<span data-stk data-fba="' + r.fbaQty + '" data-ov="' + r.overseasQty + '" data-tw="' + r.twQty + '">'
+          ? '<span data-stk data-fba="' + r.fbaQty + '" data-ov="' + r.overseasQty + '" data-tw="' + r.twQty + '" data-tr="' + r.transitQty + '">'
             + r.totalQty.toLocaleString() + ' 件</span>'
           : '<span class="text-muted">—</span>';
         var stockBadge;
@@ -3341,15 +3345,27 @@ function saveGasUrl() {
         + '</div>';
     } else if (el.hasAttribute('data-stk')) {
       // 庫存明細 (總數量欄)
-      var fba = parseInt(el.getAttribute('data-fba')||0).toLocaleString();
-      var ov  = parseInt(el.getAttribute('data-ov') ||0).toLocaleString();
-      var tw  = parseInt(el.getAttribute('data-tw') ||0).toLocaleString();
+      var fbaN = parseInt(el.getAttribute('data-fba')||0) || 0;
+      var ovN  = parseInt(el.getAttribute('data-ov') ||0) || 0;
+      var twN  = parseInt(el.getAttribute('data-tw') ||0) || 0;
+      var trN  = parseInt(el.getAttribute('data-tr') ||0) || 0;
+      function _stkRow(label, val) {
+        return '<span style="color:#7eb3ff;font-size:.88em">' + label + '</span>'
+             + '<span style="text-align:right;font-weight:600">' + val.toLocaleString() + ' 件</span>';
+      }
       tip.innerHTML =
         '<div style="font-weight:700;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.15);letter-spacing:.05em;font-size:.72rem;color:#9ca3c8">庫存明細</div>'
         +'<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:center">'
-        +'<span style="color:#7eb3ff;font-size:.88em">FBA</span><span style="text-align:right;font-weight:600">'+fba+' 件</span>'
-        +'<span style="color:#7eb3ff;font-size:.88em">外倉</span><span style="text-align:right;font-weight:600">'+ov+' 件</span>'
-        +'<span style="color:#7eb3ff;font-size:.88em">台灣倉</span><span style="text-align:right;font-weight:600">'+tw+' 件</span>'
+        + _stkRow('FBA',    fbaN)
+        + _stkRow('外倉',   ovN)
+        + _stkRow('台灣倉', twN)
+        // 在途只在有值時顯示，否則多數產品會多出一行 0
+        + (trN > 0 ? _stkRow('在途', trN) : '')
+        +'</div>'
+        +'<div style="margin-top:7px;padding-top:6px;border-top:1px solid rgba(255,255,255,.15);'
+        +'display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center">'
+        +'<span style="font-size:.88em;color:#9ca3c8">總計</span>'
+        +'<span style="text-align:right;font-weight:700">' + (fbaN+ovN+twN+trN).toLocaleString() + ' 件</span>'
         +'</div>';
     } else {
       // 採購量明細 (建議採購量欄)
