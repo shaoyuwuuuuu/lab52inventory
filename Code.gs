@@ -308,6 +308,7 @@ function readMovements_() {
   var iExp  = mCol(['exp_date','Exp_date'], 5);
   var iBox  = mCol(['Boxes','boxes'],       6);
   var iLoc  = mCol(['location','Location'], -1);
+  var iPcs  = mCol(['qty_pcs','Qty_pcs'],   -1);
   var iNote = mCol(['note','Note'], iLoc >= 0 ? iLoc + 1 : 8);
   var result = [];
   for (var i = 1; i < vals.length; i++) {
@@ -326,6 +327,9 @@ function readMovements_() {
       asin:     String(r[iAsin] || '').trim(),
       exp_date: formatDate_(r[iExp]),
       boxes:    parseFloat(r[iBox]) || 0,
+      // 實際件數。外倉組的每箱數量常與產品主檔不同，有填就以這個為準；
+      // 留空則回頭用 箱數 × 每箱數量 換算（沿用 TW_Movement 既有的做法）
+      qty_pcs:  iPcs >= 0 && r[iPcs] !== '' && r[iPcs] !== null ? (parseFloat(r[iPcs]) || 0) : null,
       location: iLoc >= 0 ? (String(r[iLoc] || '').trim() || 'AMZLGS') : 'AMZLGS',
       note:     String(r[iNote] || '').trim(),
       row_idx:  i + 1
@@ -359,12 +363,25 @@ function readSheet_(name) {
 // ── Movement Entry ─────────────────────────────────────────────────────────────
 // Movement 欄位: Date, Name, SKU, EAN, ASIN, exp_date, Boxes, location, note
 
+// Movement 補上 qty_pcs 欄。台灣倉一直都有這欄，海外倉沒有 ——
+// 外倉組的每箱數量常與產品主檔不同，只記箱數就換算不出正確件數。
+// 加在尾端，既有資料與讀取邏輯（依標題名稱查找）都不受影響。
+function ensureMovementPcsColumn_(sheet) {
+  var lastCol = sheet.getLastColumn();
+  var hdr = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+    .map(function(h) { return String(h).trim(); });
+  if (hdr.indexOf('qty_pcs') >= 0) return hdr;
+  if (sheet.getMaxColumns() < lastCol + 1) sheet.insertColumnsAfter(sheet.getMaxColumns(), 1);
+  sheet.getRange(1, lastCol + 1).setValue('qty_pcs')
+    .setFontWeight('bold').setBackground('#2D5016').setFontColor('#ffffff');
+  return hdr.concat(['qty_pcs']);
+}
+
 function addMovementEntry(d) {
   try {
     var sheet = ss_().getSheetByName('Movement');
     if (!sheet) return { error: 'Movement sheet not found' };
-    var lastCol = sheet.getLastColumn();
-    var hdr = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) { return String(h).trim(); });
+    var hdr = ensureMovementPcsColumn_(sheet);
     var row = hdr.map(function(h) {
       if (h === 'Date')     return d.date     || formatDate_(new Date());
       if (h === 'Name')     return d.name     || '';
@@ -373,6 +390,8 @@ function addMovementEntry(d) {
       if (h === 'ASIN')     return d.asin     || '';
       if (h === 'exp_date') return d.exp_date || '';
       if (h === 'Boxes')    return parseFloat(d.boxes) || 0;
+      if (h === 'qty_pcs')  return (d.qty_pcs === '' || d.qty_pcs == null)
+                                     ? '' : (parseFloat(d.qty_pcs) || 0);
       if (h === 'location') return d.location || 'AMZLGS';
       if (h === 'note')     return d.note     || '';
       return '';

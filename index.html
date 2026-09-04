@@ -572,6 +572,12 @@ tr:hover .prod-actions{opacity:1}
             <input type="number" step="0.5" class="form-control form-control-sm" id="m-boxes" placeholder="例: -20 或 +50">
           </div>
           <div class="col-6">
+            <label class="form-label small">件數（規格不同時才填）</label>
+            <input type="number" step="1" min="0" class="form-control form-control-sm" id="m-pcs"
+                   placeholder="留空＝依每箱數量換算" oninput="onMovementPcsInput()">
+            <div id="m-pcs-hint" class="text-muted" style="font-size:.72rem;min-height:14px"></div>
+          </div>
+          <div class="col-6">
             <label class="form-label small">效期（exp_date）</label>
             <input type="date" class="form-control form-control-sm" id="m-exp-date">
           </div>
@@ -1296,11 +1302,23 @@ function renderDashboard() {
 
   // Overseas (AMZLGS) net stock in boxes
   // Movement 可能混有 location=TW 的列，那些已經算在 twBoxByEan 裡，要排除避免重複計算
-  var overseasBoxByEan = {};
+  var overseasBoxByEan = {}, overseasPcsByEan = {};
+  var qpcByEan = {};
+  (S.products || []).forEach(function(p) {
+    if (p.ean) qpcByEan[p.ean] = parseFloat(p.qty_per_carton) || 0;
+  });
   (S.movements || []).forEach(function(m) {
     var ean = m.ean || ''; if (!ean) return;
     if ((m.location || 'AMZLGS').toUpperCase() === 'TW') return;
-    overseasBoxByEan[ean] = (overseasBoxByEan[ean] || 0) + (parseFloat(m.boxes) || 0);
+    var boxes = parseFloat(m.boxes) || 0;
+    overseasBoxByEan[ean] = (overseasBoxByEan[ean] || 0) + boxes;
+    // 有填件數就以實際值為準（外倉組的每箱數量與主檔不同），沒填才用箱數換算。
+    // 正負號一律跟著箱數走，出庫填正數也不會算成入庫。
+    var hasPcs = m.qty_pcs !== null && m.qty_pcs !== undefined && m.qty_pcs !== '';
+    var pcs = hasPcs
+      ? Math.abs(parseFloat(m.qty_pcs) || 0) * (boxes < 0 ? -1 : 1)
+      : boxes * (qpcByEan[ean] || 0);
+    overseasPcsByEan[ean] = (overseasPcsByEan[ean] || 0) + pcs;
   });
 
 
@@ -1488,7 +1506,8 @@ function renderDashboard() {
     // 那些已經賣掉即將離開，算成庫存會高估水位、導致少生產
     var fbaQty        = fba ? fbaAvailQty(fba) : 0;
     var twQty         = (twBoxByEan[p.ean]       || 0) * qpc;
-    var overseasQty   = (overseasBoxByEan[p.ean] || 0) * qpc;
+    // 用累加好的實際件數，不再一律 箱數×每箱數量 —— 外倉組的規格不一樣
+    var overseasQty   = overseasPcsByEan[p.ean] || 0;
     // 在途的貨建立時已從來源倉扣掉，加回來不會重複；不加就等於在海上那段期間憑空消失
     var transitQty    = (trackedTransitByEan[p.ean] || 0) * qpc;
     var totalQty    = fbaQty + twQty + transitQty + overseasQty;
@@ -2587,9 +2606,11 @@ function openMovementModal(ean, location) {
   document.getElementById('m-date').value = new Date().toISOString().slice(0,10);
   document.getElementById('m-location').value = location || 'AMZLGS';
   document.getElementById('m-boxes').value = '';
+  document.getElementById('m-pcs').value = '';
   document.getElementById('m-exp-date').value = '';
   document.getElementById('m-note').value = '';
   onMovementEanChange();
+  onMovementPcsInput();
   getModal('movementModal').show();
 }
 
@@ -2920,6 +2941,24 @@ function saveNoteInline(el) {
     });
   }
 }
+// 即時把填的件數換算成每箱多少，跟主檔比對 —— 打錯一個零馬上看得出來
+function onMovementPcsInput() {
+  var hint = document.getElementById('m-pcs-hint');
+  if (!hint) return;
+  var pcs   = parseFloat(document.getElementById('m-pcs').value);
+  var boxes = Math.abs(parseFloat(document.getElementById('m-boxes').value) || 0);
+  var p = S.products.find(function(x){ return x.ean === document.getElementById('m-product-ean').value; });
+  var qpc = p ? (parseFloat(p.qty_per_carton) || 0) : 0;
+  if (!pcs || !boxes) {
+    hint.textContent = qpc ? '留空則以每箱 ' + qpc + ' 換算' : '';
+    hint.style.color = '';
+    return;
+  }
+  var implied = Math.round(pcs / boxes * 10) / 10;
+  hint.textContent = '等於每箱 ' + implied + (qpc ? '（主檔 ' + qpc + '）' : '');
+  hint.style.color = (qpc && implied !== qpc) ? 'var(--warn-text)' : '';
+}
+
 function saveMovement() {
   var btn = document.getElementById('m-save-btn');
   if (btn && btn.disabled) return;
@@ -2940,6 +2979,8 @@ function saveMovement() {
     date:     date,
     location: document.getElementById('m-location').value,
     boxes:    boxes,
+    // 留空就送空字串，後端會存空值、之後仍用每箱數量換算
+    qty_pcs:  document.getElementById('m-pcs').value.trim(),
     exp_date: document.getElementById('m-exp-date').value,
     note:     document.getElementById('m-note').value.trim()
   };
