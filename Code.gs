@@ -636,28 +636,33 @@ function addTransit(d) {
     insertAtTop_(tSheet, hdr.map(function(h) {
       return vals[h] !== undefined ? vals[h] : '';
     }));
-    if (fromLoc === 'TW') {
-      addTaiwanEntry({
-        date:     d.ship_date,
-        ean:      d.ean,
-        name:     d.product_name,
-        sku:      d.sku,
-        boxes:    -qty,
-        exp_date: d.exp_date,
-        note:     '在途出發 #' + id
-      });
-    } else {
-      addMovementEntry({
-        date:     d.ship_date,
-        name:     d.product_name,
-        sku:      d.sku,
-        ean:      d.ean,
-        asin:     d.asin || '',
-        exp_date: d.exp_date,
-        boxes:    -qty,
-        location: fromLoc,
-        note:     '在途出發 #' + id
-      });
+    // skip_stock：只建立在途紀錄、不扣來源倉。給資料搬遷用 ——
+    // 搬遷時庫存另外以盤點方式更新，這裡再扣一次就變成重複計算。
+    // 前端一般流程不會帶這個旗標。
+    if (!d.skip_stock) {
+      if (fromLoc === 'TW') {
+        addTaiwanEntry({
+          date:     d.ship_date,
+          ean:      d.ean,
+          name:     d.product_name,
+          sku:      d.sku,
+          boxes:    -qty,
+          exp_date: d.exp_date,
+          note:     '在途出發 #' + id
+        });
+      } else {
+        addMovementEntry({
+          date:     d.ship_date,
+          name:     d.product_name,
+          sku:      d.sku,
+          ean:      d.ean,
+          asin:     d.asin || '',
+          exp_date: d.exp_date,
+          boxes:    -qty,
+          location: fromLoc,
+          note:     '在途出發 #' + id
+        });
+      }
     }
     return { ok: true, id: id };
   } catch(e) { return { error: e.message }; }
@@ -813,7 +818,9 @@ function addTransitBatch(d) {
         tracking_no:   d.tracking_no,
         carrier:       d.carrier,
         note:          d.note,
-        shipment_id:   shipmentId
+        shipment_id:   shipmentId,
+        // 搬遷時整批帶 skip_stock，庫存另外以盤點更新，這裡不能再扣一次
+        skip_stock:    it.skip_stock || d.skip_stock || false
       });
       if (r && r.ok) created.push(r.id);
       else failed.push({ ean: it.ean, error: (r && r.error) || '未知錯誤' });
@@ -854,14 +861,14 @@ function manualTransitMigration_(dryRun) {
       var s = String(t.status || '').toUpperCase();
       return s === 'TRANSIT' || s === 'ARRIVING';
     });
-    say('[1] 將刪除的在途紀錄：' + actives.length + ' 筆（箱數退回來源倉）');
+    say('※ 全程不會動到台灣倉或任何倉庫的庫存，只處理在途紀錄本身');
+    say('[1] 將刪除的在途紀錄：' + actives.length + ' 筆（不退回庫存）');
     actives.forEach(function(t) {
-      say('    #' + t.id + '　' + (t.product_name || t.ean) + '　'
-          + t.qty_cartons + ' 箱 → 退回 ' + (t.from_location || 'TW'));
+      say('    #' + t.id + '　' + (t.product_name || t.ean) + '　' + t.qty_cartons + ' 箱');
     });
     if (!dryRun) {
       actives.forEach(function(t) {
-        var r = deleteTransit(t.id);
+        var r = deleteTransit(t.id, { skip_refund: true });
         if (r && r.error) say('    ★ #' + t.id + ' 刪除失敗：' + r.error);
       });
     }
@@ -871,7 +878,7 @@ function manualTransitMigration_(dryRun) {
     var products = readProducts_();
     products.forEach(function(p) { if (p.asin) prodByAsin[String(p.asin).trim()] = p; });
 
-    // 刪除步驟已經把測試在途的箱數退回台灣倉，所以這裡要重讀才是正確的餘額
+    // 只拿來對照顯示，搬遷本身不會改動它
     var twByEan = {};
     readTaiwanMovements_().forEach(function(m) {
       twByEan[m.ean] = (twByEan[m.ean] || 0) + (parseFloat(m.boxes) || 0);
@@ -882,7 +889,8 @@ function manualTransitMigration_(dryRun) {
       var p = prodByAsin[x.asin];
       if (!p || !p.ean) { missing.push(x); return; }
       items.push({ ean: p.ean, product_name: p.name || x.label, sku: p.sku || '',
-                   qty_cartons: x.qty, _tw: twByEan[p.ean] || 0, _label: x.label });
+                   qty_cartons: x.qty, skip_stock: true,
+                   _tw: twByEan[p.ean] || 0, _label: x.label });
     });
 
     if (missing.length) {
@@ -896,9 +904,8 @@ function manualTransitMigration_(dryRun) {
     say('[2] 將建立的在途：' + items.length + ' 筆，共 ' + (Math.round(total * 10) / 10)
         + ' 箱（同一批，TW → AMZLGS，出發日留空）');
     items.forEach(function(it) {
-      var left = Math.round((it._tw - it.qty_cartons) * 10) / 10;
-      say('    ' + it._label + '　' + it.qty_cartons + ' 箱　台灣倉 ' + it._tw
-          + ' → ' + left + (left < 0 ? '　★ 台灣倉會變負數 ★' : ''));
+      say('    ' + it._label + '　' + it.qty_cartons + ' 箱　（台灣倉目前 '
+          + it._tw + '，維持不變）');
     });
 
     // Shared 裡的舊手動在途一律清掉：那份數字已被這份取代，留著會重複計算
@@ -1119,7 +1126,8 @@ function confirmArrival(transitId, d) {
 
 // 刪除在途時必須把 addTransit 從來源倉扣掉的箱數加回去。
 // 原本只刪 Transits 那一列，來源倉的 -N 箱會永遠留著，刪一筆就憑空少一批貨。
-function deleteTransit(id) {
+// opts.skip_refund：只刪紀錄、不退回來源倉（資料搬遷用，庫存另外盤點更新）
+function deleteTransit(id, opts) {
   try {
     var tSheet = ss_().getSheetByName('Transits');
     if (!tSheet) return { error: 'Transits sheet not found' };
@@ -1143,7 +1151,7 @@ function deleteTransit(id) {
       return { error: '已退回的紀錄不可刪除：箱數在退回時就已經補回來源倉，再刪會重複計算。' };
     }
 
-    if (qty > 0) {
+    if (qty > 0 && !(opts && opts.skip_refund)) {
       var common = {
         date:     formatDate_(new Date()),
         ean:      String(col('ean')          || ''),
