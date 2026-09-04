@@ -869,6 +869,64 @@ function clearMigrationNotes() {
   } catch(e) { return { error: e.message }; }
 }
 
+// ── 2026-08-13 那批的完整資料（使用者提供）─────────────────────────────────
+// 箱數已正確，這裡補上出發日、業者、效期，並清掉搬遷時寫入的備註。
+// pcs 只用來反推每箱數量、跟庫存總覽對帳，Transits 不存這個欄位（可由箱數換算）。
+var TRANSIT_SHIPMENT_DETAILS_ = {
+  ship_date: '2026-08-13',
+  carrier:   'EZ',
+  items: [
+    { asin: 'B0B5QWQ7PP', boxes: 15, pcs: 2160, exp_date: '2029-02-25', label: '香草噴霧'   },
+    { asin: 'B0F6T1FCZD', boxes: 10, pcs: 1440, exp_date: '2029-02-25', label: '原味噴霧'   },
+    { asin: 'B0DBTTVWB4', boxes: 10, pcs:  360, exp_date: '2029-02-25', label: '草莓+香草' },
+    { asin: 'B0DBT8RDPJ', boxes: 20, pcs:  720, exp_date: '2027-09-10', label: '草莓+桃子' },
+    { asin: 'B0GK66X2RN', boxes:  5, pcs:  720, exp_date: '2029-04-09', label: '清新噴霧'   },
+    { asin: 'B0C9T4XCJF', boxes: 10, pcs:  600, exp_date: '2029-05-15', label: '三入葡萄'   }
+  ]
+};
+
+function applyTransitShipmentDetails() {
+  var out = [];
+  function say(s) { out.push(s); Logger.log(s); }
+  try {
+    var prodByAsin = {};
+    readProducts_().forEach(function(p) {
+      if (p.asin) prodByAsin[String(p.asin).trim()] = p;
+    });
+    var actives = readSheet_('Transits').filter(function(t) {
+      var s = String(t.status || '').toUpperCase();
+      return s === 'TRANSIT' || s === 'ARRIVING';
+    });
+
+    var d = TRANSIT_SHIPMENT_DETAILS_, done = 0;
+    d.items.forEach(function(x) {
+      var p = prodByAsin[x.asin];
+      if (!p || !p.ean) { say('★ ' + x.label + '：ASIN ' + x.asin + ' 在庫存總覽找不到'); return; }
+      var t = actives.filter(function(a) { return String(a.ean) === String(p.ean); })[0];
+      if (!t) { say('★ ' + x.label + '：在途中找不到這個產品'); return; }
+
+      // 對帳：pcs ÷ 箱數 應該等於庫存總覽的每箱數量，不符代表其中一邊有誤
+      var implied = x.boxes ? Math.round(x.pcs / x.boxes) : 0;
+      var master  = parseFloat(p.qty_per_carton) || 0;
+      var warn = (master && implied !== master)
+        ? '　★ 每箱數量不符：你的資料推得 ' + implied + '，庫存總覽是 ' + master + ' ★' : '';
+      if (Number(t.qty_cartons) !== x.boxes) {
+        warn += '　★ 箱數不符：在途是 ' + t.qty_cartons + '，你的資料是 ' + x.boxes + ' ★';
+      }
+
+      // 不帶 qty_cartons，所以完全不會動到庫存
+      var r = updateTransit(t.id, {
+        ship_date: d.ship_date, carrier: d.carrier, exp_date: x.exp_date, note: ''
+      });
+      if (r && r.ok) { done++; say('✅ ' + x.label + '　#' + t.id + '　效期 ' + x.exp_date + warn); }
+      else say('❌ ' + x.label + '：' + ((r && r.error) || '未知錯誤'));
+    });
+    say('完成：更新 ' + done + ' 筆，出發日 ' + d.ship_date + '、業者 ' + d.carrier);
+    say('（未帶箱數，全程沒有動到任何庫存）');
+  } catch(e) { say('★ 中斷：' + e.message); }
+  return out.join('\n');
+}
+
 function previewManualTransitMigration() { return manualTransitMigration_(true); }
 function runManualTransitMigration()     { return manualTransitMigration_(false); }
 
