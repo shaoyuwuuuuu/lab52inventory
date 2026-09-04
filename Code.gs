@@ -822,6 +822,88 @@ function addTransitBatch(d) {
   } catch(e) { return { error: e.message }; }
 }
 
+// ── 一次性搬遷：手動在途 → 正式在途 ──────────────────────────────────────────
+// 先執行 previewManualTransitMigration() 看會發生什麼，確認後再執行
+// runManualTransitMigration()。預覽完全不寫入。
+//
+// 注意兩者的庫存語意不同：手動在途從來沒有真的扣過台灣倉（只是畫面上的減項），
+// 正式在途會真的扣。所以搬遷後台灣倉的數字會下降，但「扣除後」看到的可用量不變。
+function previewManualTransitMigration() { return manualTransitMigration_(true); }
+function runManualTransitMigration()     { return manualTransitMigration_(false); }
+
+function manualTransitMigration_(dryRun) {
+  var out = [];
+  function say(s) { out.push(s); Logger.log(s); }
+  say(dryRun ? '=== 預覽模式：不會寫入任何資料 ===' : '=== 實際執行 ===');
+
+  try {
+    // 1. 現有在途中的紀錄（使用者確認為測試資料）
+    var actives = readSheet_('Transits').filter(function(t) {
+      var s = String(t.status || '').toUpperCase();
+      return s === 'TRANSIT' || s === 'ARRIVING';
+    });
+    say('[1] 將刪除的在途紀錄：' + actives.length + ' 筆（箱數退回來源倉）');
+    actives.forEach(function(t) {
+      say('    #' + t.id + '　' + (t.product_name || t.ean) + '　'
+          + t.qty_cartons + ' 箱 → 退回 ' + (t.from_location || 'TW'));
+    });
+    if (!dryRun) {
+      actives.forEach(function(t) {
+        var r = deleteTransit(t.id);
+        if (r && r.error) say('    ★ #' + t.id + ' 刪除失敗：' + r.error);
+      });
+    }
+
+    // 2. 手動在途 → 一批正式在途
+    var prodByEan = {};
+    readProducts_().forEach(function(p) { if (p.ean) prodByEan[p.ean] = p; });
+
+    var shared = readShared_();
+    var pre = 'manual_transit_';
+    var items = [], keys = [];
+    Object.keys(shared).forEach(function(k) {
+      if (k.indexOf(pre) !== 0) return;
+      var qty = parseFloat(shared[k]) || 0;
+      if (qty <= 0) return;
+      var ean = k.slice(pre.length);
+      var p = prodByEan[ean] || {};
+      items.push({ ean: ean, product_name: p.name || ean, sku: p.sku || '', qty_cartons: qty });
+      keys.push(k);
+    });
+    var total = items.reduce(function(n, x) { return n + x.qty_cartons; }, 0);
+    say('[2] 將建立的在途：' + items.length + ' 筆，共 ' + (Math.round(total * 10) / 10)
+        + ' 箱（同一批，TW → AMZLGS，出發日留空）');
+    items.forEach(function(it) {
+      say('    ' + it.product_name + '　' + it.qty_cartons + ' 箱');
+    });
+
+    if (!dryRun && items.length) {
+      var res = addTransitBatch({
+        from_location: 'TW', to_location: 'AMZLGS',
+        ship_date: '', eta_date: '', tracking_no: '', carrier: '',
+        note: '由手動在途轉入',
+        items: items
+      });
+      say('    建立 ' + ((res && res.count) || 0) + ' 筆');
+      ((res && res.failed) || []).forEach(function(f) {
+        say('    ★ ' + f.ean + ' 失敗：' + f.error);
+      });
+
+      // 3. 清掉手動在途的設定，避免兩邊重複計算
+      keys.forEach(function(k) { setShared({ key: k, value: '' }); });
+      say('[3] 已清除手動在途設定 ' + keys.length + ' 筆');
+    } else if (dryRun) {
+      say('[3] 將清除手動在途設定 ' + keys.length + ' 筆');
+    }
+
+    say(dryRun ? '=== 預覽結束，確認無誤請執行 runManualTransitMigration() ==='
+               : '=== 搬遷完成 ===');
+  } catch(e) {
+    say('★ 中斷：' + e.message);
+  }
+  return out.join('\n');
+}
+
 // ── 自我測試：在途追蹤（階段一）───────────────────────────────────────────────
 // 在 GAS 編輯器選 testTransitTracking 執行，看下方執行紀錄。
 // 會建立一筆測試在途、逐項驗證，最後把自己造成的痕跡全部刪除（含台灣倉／海外倉的異動列）。
