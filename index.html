@@ -1237,15 +1237,73 @@ function renderDashboard() {
     } else {
       twrap.style.display = '';
       var today0 = new Date().toISOString().slice(0,10);
-      document.getElementById('active-transits-list').innerHTML = activeT.map(function(t) {
-        var overdue = t.eta_date && t.eta_date < today0;
-        return '<div class="d-flex align-items-center justify-content-between border-bottom px-3 py-2 gap-2">'
-          + '<div style="flex:1;min-width:0"><span class="fw-semibold" style="font-size:.85rem">' + escHtml(t.product_name || t.ean || '?') + '</span>'
-          + ' <span class="text-muted" style="font-size:.75rem">&#8594; ' + escHtml(t.to_location||'') + ' | ' + parseFloat(t.qty_cartons).toFixed(1) + ' 箱'
-          + (t.eta_date ? ' | ETA ' + t.eta_date : '') + '</span>'
-          + (overdue ? ' <span class="badge bg-danger ms-1" style="font-size:.65rem">逾期</span>' : '') + '</div>'
-          + '<button class="btn btn-sm btn-outline-primary py-0" style="font-size:.75rem;white-space:nowrap" onclick="openArrivalModal(' + t.id + ')">確認到貨</button>'
+
+      // 依批次分組。shipment_id 是同一次「新增在途」共用的；
+      // 舊資料沒有就退而用追蹤號、再退而用出發日，都沒有才各自獨立一組。
+      function groupKey(t) {
+        return String(t.shipment_id || '').trim()
+            || (String(t.tracking_no || '').trim() ? 'trk:' + t.tracking_no : '')
+            || (String(t.ship_date   || '').trim() ? 'day:' + t.ship_date   : '')
+            || 'id:' + t.id;
+      }
+      var groups = [], seen = {};
+      activeT.forEach(function(t) {
+        var k = groupKey(t);
+        if (!seen[k]) { seen[k] = { items: [] }; groups.push(seen[k]); }
+        seen[k].items.push(t);
+      });
+      // 有待確認品項的批次排最前面，那是需要動手的
+      groups.sort(function(a, b) {
+        function hasArriving(g) {
+          return g.items.some(function(x){ return x.status === 'ARRIVING'; }) ? 1 : 0;
+        }
+        return hasArriving(b) - hasArriving(a);
+      });
+
+      document.getElementById('active-transits-list').innerHTML = groups.map(function(g) {
+        var first = g.items[0];
+        var boxes = g.items.reduce(function(n, x){ return n + (parseFloat(x.qty_cartons) || 0); }, 0);
+        var trk   = String(first.tracking_no || '').trim();
+        var head  = '<div class="px-3 py-1 d-flex flex-wrap align-items-center gap-2 border-bottom"'
+          + ' style="background:var(--bg3);font-size:.74rem">'
+          + '<span class="fw-semibold">'
+          + (first.ship_date ? escHtml(first.ship_date) + ' 出貨' : '未填出發日') + '</span>'
+          + '<span class="text-muted">' + escHtml(first.from_location || '') + ' &#8594; '
+          + escHtml(first.to_location || '') + '</span>'
+          + '<span class="text-muted">' + g.items.length + ' 項 / '
+          + (Math.round(boxes * 10) / 10) + ' 箱</span>'
+          + (first.eta_date ? '<span class="text-muted">ETA ' + escHtml(first.eta_date) + '</span>' : '')
+          + (trk
+              ? '<a href="' + trackingUrl(trk) + '" target="_blank" rel="noopener"'
+                + ' style="font-family:monospace">' + escHtml(trk) + '</a>'
+              : '<span class="text-muted">無追蹤號</span>')
           + '</div>';
+
+        return head + g.items.map(function(t) {
+          var overdue  = t.eta_date && t.eta_date < today0;
+          var arriving = t.status === 'ARRIVING';
+          return '<div class="d-flex align-items-center justify-content-between border-bottom px-3 py-2 gap-2"'
+            + (arriving ? ' style="background:var(--warn-bg)"' : '') + '>'
+            + '<div style="flex:1;min-width:0">'
+            + (arriving ? '<span class="badge bg-warning me-1" style="font-size:.65rem">待確認到貨</span>' : '')
+            + '<span class="fw-semibold" style="font-size:.85rem">'
+            + escHtml(t.product_name || t.ean || '?') + '</span>'
+            + ' <span class="text-muted" style="font-size:.75rem">'
+            + parseFloat(t.qty_cartons).toFixed(1) + ' 箱'
+            + (t.tracking_status ? ' · ' + escHtml(t.tracking_status) : '') + '</span>'
+            + (overdue && !arriving
+                ? ' <span class="badge bg-danger ms-1" style="font-size:.65rem">逾期</span>' : '')
+            + '</div>'
+            + '<div class="d-flex gap-1" style="white-space:nowrap">'
+            + (arriving ? ''
+                : '<button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.75rem"'
+                  + ' title="貨到了但還沒點收" onclick="markArriving(' + t.id + ')">已送達</button>')
+            + '<button class="btn btn-sm btn-outline-warning py-0" style="font-size:.75rem"'
+            + ' title="整批退回來源倉" onclick="openReturnModal(' + t.id + ')">退回</button>'
+            + '<button class="btn btn-sm btn-outline-primary py-0" style="font-size:.75rem"'
+            + ' onclick="openArrivalModal(' + t.id + ')">確認到貨</button>'
+            + '</div></div>';
+        }).join('');
       }).join('');
     }
   }
@@ -1507,203 +1565,6 @@ function renderProdSuggest() {
     + '</tbody></table></div>';
 
   makeResizable('production-suggest-tbl');
-}
-
-function renderDashboard_OLD_UNUSED() {
-  // Per-EAN stock: overseas from movements, TW from dedicated taiwan array
-  var stockByEan = {};
-  S.movements.forEach(function(m) {
-    var ean = m.ean || ''; if (!ean) return;
-    if (!stockByEan[ean]) stockByEan[ean] = { TW:0, AMZLGS:0 };
-    stockByEan[ean].AMZLGS += parseFloat(m.boxes) || 0;
-  });
-  S.taiwan.forEach(function(m) {
-    var ean = m.ean || ''; if (!ean) return;
-    if (!stockByEan[ean]) stockByEan[ean] = { TW:0, AMZLGS:0 };
-    stockByEan[ean].TW += parseFloat(m.boxes) || 0;
-  });
-
-  // In-transit by EAN
-  var transitByEan = {};
-  S.transits.filter(isInTransit).forEach(function(t) {
-    var ean = t.ean || '';
-    if (!ean) return;
-    transitByEan[ean] = (transitByEan[ean] || 0) + (parseFloat(t.qty_cartons) || 0);
-  });
-
-  function fmtQ(n) {
-    n = Math.round(n * 10) / 10;
-    return n > 0 ? '<span class="fw-semibold">' + n.toFixed(1) + '</span>'
-                 : '<span class="text-muted">—</span>';
-  }
-
-  var tHtml = '<div class="table-responsive"><table class="table table-hover mb-0"><thead><tr>'
-    + '<th>產品</th>'
-    + '<th>台灣倉</th>'
-    + '<th>外倉</th>'
-    + '<th style="color:#1E7BC4">在途</th>'
-    + '<th>狀態</th></tr></thead><tbody>';
-  if (S.products.length === 0) {
-    tHtml += '<tr><td colspan="5" class="text-muted text-center py-3">尚無產品資料</td></tr>';
-  } else {
-    tHtml += S.products.map(function(p) {
-      var st  = stockByEan[p.ean] || { TW:0, AMZLGS:0 };
-      var tw  = Math.round(st.TW * 10) / 10;
-      var amz = Math.round(st.AMZLGS * 10) / 10;
-      // Fallback to formula-computed boxes from sheet if no movement matched
-      if (tw === 0 && amz === 0 && (p.boxes || 0) > 0) {
-        amz = Math.round((p.boxes || 0) * 10) / 10;
-      }
-      var tr  = Math.round((transitByEan[p.ean] || 0) * 10) / 10;
-      var badge = (amz <= 0 && tw <= 0)
-        ? '<span class="badge bg-danger">需補貨</span>'
-        : amz <= 5
-          ? '<span class="badge bg-warning">偏低</span>'
-          : '<span class="badge bg-success">正常</span>';
-      return '<tr>'
-        + '<td><span class="fw-bold">' + escHtml(p.name || '') + '</span>'
-        + (p.sku ? '<br><small class="text-muted">' + escHtml(p.sku) + '</small>' : '')
-        + '</td>'
-        + '<td>' + fmtQ(tw) + '</td>'
-        + '<td>' + fmtQ(amz) + '</td>'
-        + '<td>'
-        + (tr > 0 ? '<span style="color:#1E7BC4;font-weight:600">' + tr.toFixed(1) + '</span>'
-                  : '<span class="text-muted">—</span>')
-        + '</td>'
-        + '<td>' + badge + '</td></tr>';
-    }).join('');
-  }
-  tHtml += '</tbody></table></div>';
-  document.getElementById('product-stock-overview').innerHTML = tHtml;
-
-  // Active transits（含 ARRIVING：貨到了但還沒點收入帳，仍算在途）
-  var activeT = S.transits.filter(isInTransit).slice()
-    .sort(function(a, b) {   // 待確認的排最上面，那是需要你動手的
-      return (b.status === 'ARRIVING' ? 1 : 0) - (a.status === 'ARRIVING' ? 1 : 0);
-    });
-  var twrap = document.getElementById('active-transits-wrap');
-  if (twrap) {
-    if (!activeT.length) {
-      twrap.style.display = 'none';
-    } else {
-      twrap.style.display = '';
-      var today0 = new Date().toISOString().slice(0,10);
-      document.getElementById('active-transits-list').innerHTML = activeT.map(function(t) {
-        var overdue  = t.eta_date && t.eta_date < today0;
-        var arriving = t.status === 'ARRIVING';
-        var trk = String(t.tracking_no || '').trim();
-        return '<div class="d-flex align-items-center justify-content-between border-bottom px-3 py-2 gap-2"'
-          + (arriving ? ' style="background:var(--warn-bg)"' : '') + '>'
-          + '<div style="flex:1;min-width:0">'
-          + (arriving ? '<span class="badge bg-warning me-1" style="font-size:.65rem">待確認到貨</span>' : '')
-          + '<span class="fw-semibold" style="font-size:.85rem">' + escHtml(t.product_name || t.ean || '?') + '</span>'
-          + ' <span class="text-muted" style="font-size:.75rem">&#8594; ' + escHtml(t.to_location || '')
-          + ' | ' + parseFloat(t.qty_cartons).toFixed(1) + ' 箱'
-          + (t.eta_date ? ' | ETA ' + t.eta_date : '') + '</span>'
-          + (overdue && !arriving ? ' <span class="badge bg-danger ms-1" style="font-size:.65rem">逾期</span>' : '')
-          + (trk ? '<div style="font-size:.72rem;margin-top:2px">'
-                 + '<a href="' + trackingUrl(trk) + '" target="_blank" rel="noopener"'
-                 + ' style="font-family:monospace">' + escHtml(trk) + '</a>'
-                 + (t.tracking_status
-                     ? ' <span class="text-muted">· ' + escHtml(t.tracking_status) + '</span>' : '')
-                 + '</div>' : '')
-          + '</div>'
-          + '<div class="d-flex gap-1" style="white-space:nowrap">'
-          + (arriving ? '' :
-              '<button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.75rem"'
-              + ' title="貨到了但還沒點收" onclick="markArriving(' + t.id + ')">已送達</button>')
-          + '<button class="btn btn-sm btn-outline-warning py-0" style="font-size:.75rem"'
-          + ' title="整批退回來源倉" onclick="openReturnModal(' + t.id + ')">退回</button>'
-          + '<button class="btn btn-sm btn-outline-primary py-0" style="font-size:.75rem"'
-          + ' onclick="openArrivalModal(' + t.id + ')">確認到貨</button>'
-          + '</div></div>';
-      }).join('');
-    }
-  }
-
-  // Recent movements (last 15)
-  var recentMoves = S.movements.slice().sort(function(a,b) {
-    return (b.date||'') < (a.date||'') ? -1 : (b.date||'') > (a.date||'') ? 1 : 0;
-  }).slice(0, 15);
-  var movHtml = recentMoves.length === 0
-    ? '<p class="text-muted small mb-0">尚無異動記錄</p>'
-    : recentMoves.map(function(m) {
-        var boxes = parseFloat(m.boxes) || 0;
-        var badgeCls = boxes >= 0 ? 'bg-success' : 'bg-danger';
-        var locLabel = m.location ? ' [' + m.location + ']' : '';
-        return '<div class="d-flex justify-content-between align-items-start border-bottom py-2">'
-          + '<div><div class="small fw-bold">' + escHtml(m.name || m.ean || '?') + '</div>'
-          + '<div class="text-muted" style="font-size:.75rem;">' + (m.date||'') + locLabel + '</div></div>'
-          + '<span class="badge movement-badge ' + badgeCls + ' ms-2">' + (boxes >= 0 ? '+' : '') + boxes.toFixed(1) + ' 箱</span>'
-          + '</div>';
-      }).join('');
-  document.getElementById('recent-moves').innerHTML = movHtml;
-
-  // Action items: products with low or zero stock
-  var actionEl = document.getElementById('action-items');
-  if (actionEl) {
-    var actionItems = S.products.filter(function(p) {
-      var st = stockByEan[p.ean] || { TW:0, AMZLGS:0 };
-      return (st.TW + st.AMZLGS) <= 5;
-    }).map(function(p) {
-      var st = stockByEan[p.ean] || { TW:0, AMZLGS:0 };
-      var total = Math.round((st.TW + st.AMZLGS) * 10) / 10;
-      var inTransit = Math.round((transitByEan[p.ean] || 0) * 10) / 10;
-      var status = total <= 0 ? { label:'需補貨', color:'red' }
-                 : inTransit > 0 ? { label:'注意', color:'amber' }
-                 : { label:'偏低', color:'amber' };
-      return { p: p, total: total, inTransit: inTransit, status: status };
-    });
-    actionEl.innerHTML = actionItems.length === 0
-      ? '<span class="text-muted small">無待處理項目</span>'
-      : actionItems.map(function(item) {
-          return '<div class="d-flex align-items-center justify-content-between border-bottom py-2" style="gap:8px">'
-            + '<div style="flex:1;min-width:0">'
-            + '<span class="fw-bold" style="font-size:.83rem">' + escHtml(item.p.name || '') + '</span>'
-            + '<span class="text-muted" style="font-size:.72rem;margin-left:6px">在倉 ' + item.total.toFixed(1) + ' 箱</span>'
-            + (item.inTransit > 0 ? ' <span class="transit-tag">+' + item.inTransit.toFixed(1) + ' 在途</span>' : '')
-            + '</div>'
-            + '<span class="action-badge ' + item.status.color + '">' + item.status.label + '</span>'
-            + '</div>';
-        }).join('');
-  }
-
-  // Expiring table (from movements + taiwan)
-  var today = new Date(); today.setHours(0,0,0,0);
-  var cutoff = new Date(today.getTime() + 180*24*60*60*1000);
-  var expMap = {};
-  S.movements.concat(S.taiwan).forEach(function(m) {
-    if (!m.exp_date || !m.ean) return;
-    var key = m.ean + '|' + m.exp_date;
-    expMap[key] = (expMap[key] || 0) + (parseFloat(m.boxes) || 0);
-  });
-  var expiring = Object.keys(expMap).filter(function(k) {
-    var parts = k.split('|'), expDate = parts[1];
-    var qty = expMap[k];
-    if (qty <= 0) return false;
-    var d = new Date(expDate); d.setHours(0,0,0,0);
-    return d <= cutoff;
-  }).sort(function(a,b) {
-    return a.split('|')[1] < b.split('|')[1] ? -1 : 1;
-  }).slice(0, 10);
-
-  var expHtml = expiring.length === 0
-    ? '<p class="text-muted small mb-0">無即將到期批次</p>'
-    : '<table class="table table-sm table-hover mb-0"><thead><tr><th>產品</th><th>EXP</th><th>剩餘天數</th><th>箱數</th></tr></thead><tbody>'
-      + expiring.map(function(k) {
-          var parts = k.split('|'), ean = parts[0], expDate = parts[1];
-          var qty = expMap[k];
-          var p = S.products.find(function(x){ return x.ean === ean; }) || {};
-          var days = Math.round((new Date(expDate) - today) / (24*60*60*1000));
-          var badge = days <= 30 ? 'bg-danger' : days <= 90 ? 'bg-warning text-dark' : 'bg-secondary';
-          var pcs = p.qty_per_carton ? ' <small class="text-muted">(≈'+Math.round(qty*p.qty_per_carton)+'pcs)</small>' : '';
-          return '<tr><td>' + escHtml(p.name || ean) + '</td>'
-            + '<td>' + expDate + '</td>'
-            + '<td><span class="badge ' + badge + '">' + days + ' 天</span></td>'
-            + '<td>' + qty.toFixed(1) + ' 箱' + pcs + '</td></tr>';
-        }).join('')
-      + '</tbody></table>';
-  document.getElementById('expiring-table').innerHTML = expHtml;
 }
 
 

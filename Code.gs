@@ -583,7 +583,10 @@ function updateTaiwanNote(d) {
 // ── 在途追蹤欄位 ─────────────────────────────────────────────────────────────
 // 一律加在 Transits 尾端。注意：絕對不要用 setupSheets() 來加欄位，
 // 那支會 deleteSheet 再 insertSheet，整張在途紀錄會被清光。
-var TRANSIT_TRACK_COLS_ = ['tracking_no', 'carrier', 'tracking_status', 'tracking_checked_at'];
+// shipment_id：同一次「新增在途」建立的多筆共用同一個值，用來在畫面上分組。
+// 不靠 tracking_no 分組 —— 海運常常沒有單號，那樣就分不出來了。
+var TRANSIT_TRACK_COLS_ = ['tracking_no', 'carrier', 'tracking_status',
+                           'tracking_checked_at', 'shipment_id'];
 
 function ensureTransitColumns_(sheet) {
   var lastCol = sheet.getLastColumn();
@@ -624,10 +627,11 @@ function addTransit(d) {
       arrived_date:  '',
       note:          d.note         || '',
       created_at:    nowStr_(),
-      tracking_no:        String(d.tracking_no || '').trim(),
-      carrier:            String(d.carrier     || '').trim(),
+      tracking_no:        String(d.tracking_no  || '').trim(),
+      carrier:            String(d.carrier      || '').trim(),
       tracking_status:    '',
-      tracking_checked_at: ''
+      tracking_checked_at: '',
+      shipment_id:        String(d.shipment_id  || '').trim()
     };
     insertAtTop_(tSheet, hdr.map(function(h) {
       return vals[h] !== undefined ? vals[h] : '';
@@ -739,6 +743,9 @@ function returnTransit(transitId, d) {
 function addTransitBatch(d) {
   try {
     if (!d || !d.items || !d.items.length) return { error: '沒有要出貨的品項' };
+    // 這一批共用的識別碼，畫面上靠它把同批的品項group在一起
+    var shipmentId = 'B' + Utilities.formatDate(
+      new Date(), Session.getScriptTimeZone(), 'yyyyMMdd-HHmmss');
     var created = [], failed = [];
     d.items.forEach(function(it) {
       var qty = Math.abs(parseFloat(it.qty_cartons) || 0);
@@ -755,7 +762,8 @@ function addTransitBatch(d) {
         eta_date:      d.eta_date,
         tracking_no:   d.tracking_no,
         carrier:       d.carrier,
-        note:          d.note
+        note:          d.note,
+        shipment_id:   shipmentId
       });
       if (r && r.ok) created.push(r.id);
       else failed.push({ ean: it.ean, error: (r && r.error) || '未知錯誤' });
