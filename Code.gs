@@ -905,6 +905,36 @@ var TRANSIT_SHIPMENT_DETAILS_ = {
   ]
 };
 
+// 2026-08-13 那批的追蹤號與業者。執行一次即可。
+// 套用到目前所有「在途中／待確認到貨」的紀錄 —— 現階段只有這一批，
+// 若之後已經有第二批在途，請改用畫面上批次標題的鉛筆按鈕逐批填，別跑這支。
+function applyTrackingNumber() {
+  var out = [];
+  function say(s) { out.push(s); Logger.log(s); }
+  try {
+    var actives = readSheet_('Transits').filter(function(t) {
+      var s = String(t.status || '').toUpperCase();
+      return s === 'TRANSIT' || s === 'ARRIVING';
+    });
+    if (!actives.length) { say('沒有在途中的紀錄'); return out.join('\n'); }
+
+    var ids = actives.map(function(t) { return t.id; });
+    say('將套用到 ' + ids.length + ' 筆：');
+    actives.forEach(function(t) {
+      say('    #' + t.id + '　' + (t.product_name || t.ean) + '　' + t.qty_cartons + ' 箱');
+    });
+
+    var r = updateTransitMany(ids, {
+      tracking_no: '1Z13Y65E0445926507',
+      carrier:     'UPS'
+    });
+    say('結果：更新 ' + ((r && r.updated) || 0) + ' 筆，追蹤號 1Z13Y65E0445926507、業者 UPS');
+    ((r && r.failed) || []).forEach(function(f) { say('    ★ #' + f.id + '：' + f.error); });
+    say('（未帶箱數，沒有動到任何庫存）');
+  } catch(e) { say('★ 中斷：' + e.message); }
+  return out.join('\n');
+}
+
 function applyTransitShipmentDetails() {
   var out = [];
   function say(s) { out.push(s); Logger.log(s); }
